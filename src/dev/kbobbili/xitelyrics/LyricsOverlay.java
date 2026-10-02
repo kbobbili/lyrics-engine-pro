@@ -34,16 +34,16 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
     private final GradientDrawable bg = new GradientDrawable();
     private String shown;
     private boolean added;
+    private int bottomDp = 56;
 
     LyricsOverlay(Context ctx, OverlayStyle style) {
         this.ctx = ctx;
         wm = ctx.getSystemService(WindowManager.class);
-        line = new TextView(ctx);
+        line = new TightTextView(ctx);
         line.setTextColor(Color.WHITE);
         line.setGravity(Gravity.CENTER);
         line.setShadowLayer(4, 0, 2, Color.BLACK);
-        line.setMaxLines(2);
-        line.setMaxWidth((int) (ctx.getResources().getDisplayMetrics().widthPixels * 0.85));
+        line.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_BALANCED);   // even line lengths
         line.setBackground(bg);
         // INVISIBLE, never GONE: a GONE view shrinks the window to zero height, and Android
         // then stops redrawing it, so the last line stays on screen after "hiding".
@@ -57,6 +57,16 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
     }
 
     void apply(OverlayStyle s) {
+        bottomDp = s.bottomDp;
+        if (added) {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) root.getLayoutParams();
+            lp.y = dp(bottomDp);
+            wm.updateViewLayout(root, lp);
+        }
+        line.setAllCaps(s.allCaps);
+        line.setMaxLines(s.maxLines);
+        line.setMaxWidth((int) (ctx.getResources().getDisplayMetrics().widthPixels * s.maxWidthFraction));
+        line.setLineSpacing(0, s.allCaps ? 1.08f : 1.0f);
         line.setTypeface(s.typeface(ctx));
         line.setTextSize(TypedValue.COMPLEX_UNIT_SP, s.textSp);
         line.setLetterSpacing(s.letterSpacing);
@@ -80,7 +90,7 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        lp.y = dp(56);   // above XITE's own bottom-edge UI
+        lp.y = dp(bottomDp);
         wm.addView(root, lp);
         added = true;
         Events.log("overlay_attached");

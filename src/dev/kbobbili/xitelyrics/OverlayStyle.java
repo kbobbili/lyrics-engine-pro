@@ -16,9 +16,23 @@ final class OverlayStyle {
     final int cornerDp;       // 999 = pill
     final int padHdp, padVdp;
     final float letterSpacing;
+    final boolean allCaps;
+    final float maxWidthFraction;   // of screen width; wraps into a compact block when small
+    final int maxLines;
+    final int bottomDp;             // gap between the box and the bottom of the screen
 
     private OverlayStyle(String name, String fontAsset, int weight, int textSp, int boxAlpha, int cornerDp,
             int padHdp, int padVdp, float letterSpacing) {
+        this(name, fontAsset, weight, textSp, boxAlpha, cornerDp, padHdp, padVdp, letterSpacing, false, 0.85f, 2, 56);
+    }
+
+    private OverlayStyle(String name, String fontAsset, int weight, int textSp, int boxAlpha, int cornerDp,
+            int padHdp, int padVdp, float letterSpacing, boolean allCaps, float maxWidthFraction, int maxLines,
+            int bottomDp) {
+        this.bottomDp = bottomDp;
+        this.allCaps = allCaps;
+        this.maxWidthFraction = maxWidthFraction;
+        this.maxLines = maxLines;
         this.name = name;
         this.fontAsset = fontAsset;
         this.weight = weight;
@@ -36,6 +50,10 @@ final class OverlayStyle {
             new OverlayStyle("3 Soft", "fonts/Nunito-Variable.ttf", 800, 32, 110, 22, 28, 12, 0f),
             new OverlayStyle("4 Crisp", "fonts/Montserrat-Variable.ttf", 700, 28, 170, 6, 26, 12, 0.02f),
             new OverlayStyle("5 Clean", "fonts/Lexend-Variable.ttf", 500, 31, 140, 16, 28, 12, 0f),
+            // Like XITE's own captions (now switched off in XITE): ALL CAPS in a compact block of
+            // up to 4 lines, where XITE's captions sat, with style 5's softer box.
+            new OverlayStyle("6 Caption", "fonts/Lexend-Variable.ttf", 600, 28, 140, 16, 22, 10, 0.02f,
+                    true, 0.45f, 4, 20),
     };
 
     static OverlayStyle get(int index) {
