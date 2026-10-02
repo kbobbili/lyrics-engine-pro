@@ -74,6 +74,8 @@ public class LyricsAccessibilityService extends AccessibilityService {
      *   am broadcast -a dev.kbobbili.xitelyrics.STYLE --ei style 2 -p dev.kbobbili.xitelyrics
      */
     static final String ACTION_STYLE = "dev.kbobbili.xitelyrics.STYLE";
+    /** "5 Clean" (Lexend), chosen by the owner 2026-10-02. */
+    private static final int DEFAULT_STYLE = 4;
     private static final String PREFS = "overlay";
     private LyricsOverlay overlay;
 
@@ -227,7 +229,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
     }
 
     private OverlayStyle style() {
-        return OverlayStyle.get(getSharedPreferences(PREFS, MODE_PRIVATE).getInt("style", 0));
+        return OverlayStyle.get(getSharedPreferences(PREFS, MODE_PRIVATE).getInt("style", DEFAULT_STYLE));
     }
 
     /** Sample text in the current style, whatever the overlay setting. */
