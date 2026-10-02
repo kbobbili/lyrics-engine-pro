@@ -9,8 +9,10 @@ SongRec algorithm), fetches synced lyrics from LRCLIB, and draws the current lin
 - Evidence per phase: [Phase 1](docs/PHASE1-RESULTS.md) · [Phase 2](docs/PHASE2-RESULTS.md) ·
   [Phases 3–4](docs/PHASE3-4-RESULTS.md) · [Phases 5–6](docs/PHASE5-6-RESULTS.md)
 
-**State:** recognition, lyrics and sync work end to end (verified on a recorded evening and with
-on-TV fixture checks). The overlay is built but **off by default** pending a live watch session.
+**State:** in daily use on the TV. Recognition, lyrics and sync work end to end: ~3 h live
+(51 songs, 39 ads) with no lookup errors, ads skipped, lyrics from the first sung line on most
+songs, and scenes/edits handled. The overlay switch defaults to off on a fresh install
+(`./install.sh <serial> --overlay on`).
 
 ## How it works
 
