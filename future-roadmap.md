@@ -105,8 +105,9 @@ Shazam starts limiting, `SyncEngine.CLIP_PERIOD` is the knob.
 - **Capture can only start from the home screen** (XITE kills itself under any activity). If capture is
   lost mid-XITE, lyrics wait for the next home-screen visit.
 
-## 6. Housekeeping
+## 6. Housekeeping — done 2026-10-02
 
-- **Phase 7 cleanup** — uninstall the old probe app `dev.kbobbili.xiteprobe` (plan: after acceptance).
-- **Recordings** — ~470 MB of Phase 2/scene recordings on the TV and in `analysis/`; delete when no
-  longer needed.
+- Old probe app `dev.kbobbili.xiteprobe` uninstalled (Phase 7); AT4K and XITE Lyrics stay enabled.
+- Recordings deleted from the TV. Kept on the PC: the 70-minute Phase 2 session in
+  `analysis/sessions/1790914276394` (gitignored) — the replay/simulation test bench and the source of
+  the fingerprint fixtures.
