@@ -95,6 +95,14 @@ public class ClientTests {
                         && LrcLibClient.primaryArtist("Bruno Mars").equals("Bruno Mars")
                         && LrcLibClient.primaryArtist("Silk Sonic with X").equals("Silk Sonic"),
                 "primary artist for LRCLIB search (ft./&/;/with)");
+        check(LrcLibClient.searchTitle("Taste Back (Lyric Video)").equals("Taste Back")
+                        && LrcLibClient.searchTitle("Song (Official Music Video)").equals("Song")
+                        && LrcLibClient.searchTitle("Visions (Visualizer)").equals("Visions")
+                        && LrcLibClient.searchTitle("Two Ghosts [Live]").equals("Two Ghosts [Live]"),
+                "video labels stripped from the LRCLIB query, [Live] kept");
+        check(Lrc.norm("Привет, мир!").equals("привет мир") && Lrc.norm("XENA").equals("xena")
+                        && !Lrc.norm("يا ليل").isEmpty(),
+                "norm keeps non-Latin scripts");
     }
 
     /** Local server that misbehaves on purpose: status codes, gzip, slowness. */

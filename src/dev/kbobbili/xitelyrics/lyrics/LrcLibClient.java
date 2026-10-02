@@ -51,6 +51,8 @@ public final class LrcLibClient {
         public final long candidateId;
         public final List<Lrc.Line> lines;
         public final String note;
+        /** Duration (s) LRCLIB lists for the chosen upload; 0 if none. */
+        public double duration;
 
         Choice(Status status, long candidateId, List<Lrc.Line> lines, String note) {
             this.status = status;
@@ -133,7 +135,9 @@ public final class LrcLibClient {
             return new Choice(Status.AMBIGUOUS, 0, new ArrayList<>(), groups.size() + " timing groups");
         }
         JSONObject best = bestInGroup(groups.get(0), pool, keys);
-        return new Choice(Status.OK, best.optLong("id"), Lrc.parse(best.optString("syncedLyrics")), "");
+        Choice ok = new Choice(Status.OK, best.optLong("id"), Lrc.parse(best.optString("syncedLyrics")), "");
+        ok.duration = best.optDouble("duration", 0);
+        return ok;
     }
 
     private static Set<String> labels(JSONObject c) {
@@ -194,21 +198,46 @@ public final class LrcLibClient {
     }
 
     private JSONArray search(String title, String artist) throws IOException, JSONException {
-        String key = (Lrc.norm(artist) + "__" + Lrc.norm(title)).replaceAll("[^a-z0-9]+", "_");
-        File cached = new File(cacheDir, key.substring(0, Math.min(120, key.length())) + ".json");
+        File cached = new File(cacheDir, cacheKey(title, artist) + ".json");
         if (cached.exists()) return new JSONArray(new String(Files.readAllBytes(cached.toPath()), StandardCharsets.UTF_8));
         String primary = primaryArtist(artist);
-        String body = fetch(baseUrl + "/api/search?track_name=" + URLEncoder.encode(title, "UTF-8")
+        String qTitle = searchTitle(title);
+        String body = fetch(baseUrl + "/api/search?track_name=" + URLEncoder.encode(qTitle, "UTF-8")
                 + "&artist_name=" + URLEncoder.encode(primary, "UTF-8"));
         if (new JSONArray(body).length() == 0) {
             // Structured search misses "A ft. B" style credits; free text finds them.
-            body = fetch(baseUrl + "/api/search?q=" + URLEncoder.encode(title + " " + primary, "UTF-8"));
+            body = fetch(baseUrl + "/api/search?q=" + URLEncoder.encode(qTitle + " " + primary, "UTF-8"));
         }
         cacheDir.mkdirs();
         try (FileOutputStream o = new FileOutputStream(cached)) {
             o.write(body.getBytes(StandardCharsets.UTF_8));
         }
         return new JSONArray(body);
+    }
+
+    private static final java.util.regex.Pattern VIDEO_LABEL = java.util.regex.Pattern.compile(
+            "\\s*[(\\[](?:official\\s+)?(?:music\\s+|lyrics?\\s+)?(?:video|audio|visuali[sz]er|lyrics?)[)\\]]",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** "Taste Back (Lyric Video)" -> "Taste Back": LRCLIB has no entries under video labels. */
+    public static String searchTitle(String title) {
+        return title == null ? "" : VIDEO_LABEL.matcher(title).replaceAll("").trim();
+    }
+
+    /** Cache file name; non-Latin titles would all collapse to "_", so they get a hash. */
+    static String cacheKey(String title, String artist) {
+        String raw = Lrc.norm(artist) + "__" + Lrc.norm(title);
+        String slug = raw.replaceAll("[^a-z0-9]+", "_");
+        slug = slug.substring(0, Math.min(100, slug.length()));
+        if (raw.chars().allMatch(c -> c < 128)) return slug;
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-1").digest(raw.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(slug).append('_');
+            for (int i = 0; i < 5; i++) sb.append(String.format("%02x", h[i]));
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return slug + "_" + Integer.toHexString(raw.hashCode());
+        }
     }
 
     /** "Tyla ft. Zara Larsson" -> "Tyla" (also feat./featuring/&/,/;/x/with). */

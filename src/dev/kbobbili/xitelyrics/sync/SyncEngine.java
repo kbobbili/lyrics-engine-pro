@@ -72,6 +72,12 @@ public final class SyncEngine {
      */
     static final long RETRY_WHILE_MUSIC_LOST = 3_000;
     static final long PROVISIONAL_MAX = 30_000;     // unconfirmed provisional lyrics give up
+    /**
+     * A video 3-15 s longer than the album track usually has an intro, so delta = 0
+     * is seconds off (live, 2026-10-02: 7 of 9 big provisional errors). Longer
+     * differences are scenes/outros later on, where the start is still aligned.
+     */
+    static final double INTRO_MIN_S = 3, INTRO_MAX_S = 15;
     static final long FIRST_CLIP_AFTER_JOIN = 2_000;
     static final long CLIP_PERIOD = 45_000;
     /** Edits cluster (Homewrecker: two cuts ~15 s apart), so look again soon after one. */
@@ -108,6 +114,7 @@ public final class SyncEngine {
 
     // Identity.
     private String panelTitle, panelArtist;
+    private double videoDurationS;              // from XITE's panel "mm:ss / mm:ss"; 0 = unknown
     private String recTitle, recArtist;
 
     // Alignment.
@@ -243,7 +250,13 @@ public final class SyncEngine {
     }
 
     public void onPanel(String title, String artist, long now) {
+        onPanel(title, artist, 0, now);
+    }
+
+    /** As onPanel, with the video length shown by the panel (seconds; 0 if unknown). */
+    public void onPanel(String title, String artist, double videoDurationS, long now) {
         if (title == null || title.isEmpty()) return;
+        if (videoDurationS > 0) this.videoDurationS = videoDurationS;
         boolean changed = !title.equals(panelTitle) || !eq(artist, panelArtist);
         panelTitle = title;
         panelArtist = artist;
@@ -303,8 +316,13 @@ public final class SyncEngine {
                 "lines", lines == null ? 0 : lines.size(), "title", title);
         if (lines != null && !aligned && !joinedMidItem && mode == Mode.ACQUIRING && panelTitle != null
                 && sameTitle(title, panelTitle) && now - itemStartRt < PROVISIONAL_MAX) {
-            provisional = true;
-            actions.log("sync_provisional", "title", title);
+            double extra = videoDurationS > 0 && c.duration > 0 ? videoDurationS - c.duration : 0;
+            if (extra > INTRO_MIN_S && extra < INTRO_MAX_S) {
+                actions.log("sync_provisional_skipped", "videoMinusAlbumS", extra);
+            } else {
+                provisional = true;
+                actions.log("sync_provisional", "title", title);
+            }
         }
         if (c.status == LrcLibClient.Status.NONE && panelTitle != null
                 && !key(panelTitle, panelArtist).equals(key) && sameTitle(title, panelTitle)) {
@@ -442,6 +460,7 @@ public final class SyncEngine {
         joinedMidItem = position > 5_000;          // engine started mid-video
         panelTitle = null;
         panelArtist = null;
+        videoDurationS = 0;
         enterAcquiring(joinedMidItem ? now + FIRST_CLIP_AFTER_JOIN : itemStartRt + FIRST_CLIP_AFTER_START, now);
     }
 

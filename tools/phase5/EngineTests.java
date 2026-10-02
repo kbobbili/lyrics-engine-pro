@@ -314,6 +314,31 @@ public class EngineTests {
         SyncEngine.Display snapped = e.display(T0 + 7_400);       // video 7.4 + 0.9 = 8.3 -> L2
         check(snapped.visible && "L2".equals(snapped.line) && f.logged("sync_provisional_snap"), "first match snaps to the measured delta");
 
+        // Video 3-15 s longer than the album track (an intro): no provisional guess.
+        f = new Fake();
+        e = new SyncEngine(f);
+        e.onSession(true, T0 - 5_000);
+        e.onForeground(true, T0 - 5_000);
+        e.onPlayback(BUFFERING, 0, T0 - 500, 0f, T0 - 500);
+        e.onPlayback(PLAYING, 0, T0, 1f, T0);
+        e.onPanel("Song", "Artist", 248, T0 + 1_500);             // video 4:08
+        LrcLibClient.Choice album = lyrics();
+        album.duration = 240;                                     // album 4:00 -> 8 s intro
+        e.onLyrics(e.itemGen(), "Song", "Artist", album, T0 + 2_500);
+        check(!e.display(T0 + 5_000).visible && f.logged("sync_provisional_skipped"),
+                "video 8 s longer than the album: provisional skipped");
+        f = new Fake();
+        e = new SyncEngine(f);
+        e.onSession(true, T0 - 5_000);
+        e.onForeground(true, T0 - 5_000);
+        e.onPlayback(BUFFERING, 0, T0 - 500, 0f, T0 - 500);
+        e.onPlayback(PLAYING, 0, T0, 1f, T0);
+        e.onPanel("Song", "Artist", 238, T0 + 1_500);             // video shorter than the album
+        album = lyrics();
+        album.duration = 240;
+        e.onLyrics(e.itemGen(), "Song", "Artist", album, T0 + 2_500);
+        check(e.display(T0 + 5_000).visible, "video not longer than the album: provisional shown");
+
         // Provisional gives up after 30 s without a match.
         f = new Fake();
         e = songStarted(f);

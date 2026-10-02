@@ -99,8 +99,15 @@ public final class LyricsController {
         engine.onForeground(xiteInFront, SystemClock.elapsedRealtime());
     }
 
-    public void onPanel(String title, String artist) {
-        engine.onPanel(title, artist, SystemClock.elapsedRealtime());
+    public void onPanel(String title, String artist, String progress) {
+        engine.onPanel(title, artist, videoDurationS(progress), SystemClock.elapsedRealtime());
+    }
+
+    /** "00:47 / 03:10" -> 190 (seconds), 0 if unreadable. */
+    static double videoDurationS(String progress) {
+        if (progress == null) return 0;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("/\\s*(\\d+):(\\d{2})").matcher(progress);
+        return m.find() ? Integer.parseInt(m.group(1)) * 60 + Integer.parseInt(m.group(2)) : 0;
     }
 
     // ------------------------------------------------ capture + recognition

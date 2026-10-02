@@ -213,7 +213,12 @@ public class Replay {
                 switch (ev.getString("type")) {
                     case "playback" -> e.onPlayback(ev.getInt("state"), ev.getLong("position"), ev.getLong("updateRt"),
                             (float) ev.getDouble("speed"), t);
-                    case "panel" -> e.onPanel(ev.optString("title", null), ev.optString("artist", null), t);
+                    case "panel" -> {
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("/\\s*(\\d+):(\\d{2})")
+                                .matcher(ev.optString("progress", ""));
+                        double dur = m.find() ? Integer.parseInt(m.group(1)) * 60 + Integer.parseInt(m.group(2)) : 0;
+                        e.onPanel(ev.optString("title", null), ev.optString("artist", null), dur, t);
+                    }
                     case "xite_foreground" -> e.onForeground(ev.getBoolean("value"), t);
                     case "session_gone", "session_destroyed" -> e.onSession(false, t);
                     case "session_attached" -> e.onSession(true, t);

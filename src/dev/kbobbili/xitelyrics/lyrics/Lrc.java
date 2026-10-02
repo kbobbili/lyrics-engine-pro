@@ -62,13 +62,16 @@ public final class Lrc {
         return ans;
     }
 
-    /** Lowercase ASCII words: drops accents, (...)/[...] and "feat." tails. */
+    /**
+     * Lowercase letters/digits of any script (Arabic, Cyrillic, ... are kept; only
+     * accents are dropped), without (...)/[...] and "feat." tails.
+     */
     public static String norm(String s) {
         if (s == null) return "";
-        String n = Normalizer.normalize(s, Normalizer.Form.NFKD).replaceAll("[^\\p{ASCII}]", "")
+        String n = Normalizer.normalize(s, Normalizer.Form.NFKD).replaceAll("\\p{M}", "")
                 .toLowerCase(Locale.ROOT);
         n = n.replaceAll("\\(.*?\\)|\\[.*?\\]", " ");
         n = n.replaceAll("\\bfeat\\.?.*$|\\bft\\..*$", " ");
-        return n.replaceAll("[^a-z0-9]+", " ").trim();
+        return n.replaceAll("[^\\p{L}\\p{N}]+", " ").trim();
     }
 }

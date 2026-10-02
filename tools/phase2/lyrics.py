@@ -13,6 +13,7 @@ Responses are cached under analysis/lrclib/.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import statistics
@@ -34,10 +35,30 @@ MIN_DURATION_S = 60
 
 
 def norm(s: str | None) -> str:
-    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+    """Lowercase letters/digits of any script; accents dropped; (...)/[...] and feat. tails removed."""
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
     s = re.sub(r"\(.*?\)|\[.*?\]", " ", s)          # drop (feat. ...) etc.
     s = re.sub(r"\bfeat\.?.*$|\bft\..*$", " ", s)
-    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+    return re.sub(r"[\W_]+", " ", s).strip()
+
+
+VIDEO_LABEL = re.compile(r"\s*[(\[](?:official\s+)?(?:music\s+|lyrics?\s+)?(?:video|audio|visuali[sz]er|lyrics?)[)\]]",
+                         re.I)
+
+
+def search_title(title: str) -> str:
+    """'Taste Back (Lyric Video)' -> 'Taste Back': LRCLIB has no entries under video labels."""
+    return VIDEO_LABEL.sub("", title or "").strip()
+
+
+def cache_key(title: str, artist: str) -> str:
+    raw = f"{norm(artist)}__{norm(title)}"
+    slug = re.sub(r"[^a-z0-9]+", "_", raw)[:100]
+    if raw.isascii():
+        return slug
+    # non-Latin titles would all collapse to "_": keep them apart with a hash
+    return f"{slug}_{hashlib.sha1(raw.encode()).hexdigest()[:10]}"
 
 
 def labels(c: dict) -> frozenset[str]:
@@ -47,14 +68,14 @@ def labels(c: dict) -> frozenset[str]:
 
 def search(title: str, artist: str) -> list[dict]:
     CACHE.mkdir(parents=True, exist_ok=True)
-    key = re.sub(r"[^a-z0-9]+", "_", f"{norm(artist)}__{norm(title)}")[:120]
-    path = CACHE / f"{key}.json"
+    path = CACHE / f"{cache_key(title, artist)}.json"
     record_query(title, artist, path.name)
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
-    data = fetch({"track_name": title, "artist_name": primary_artist(artist)})
+    q_title = search_title(title)
+    data = fetch({"track_name": q_title, "artist_name": primary_artist(artist)})
     if not data:   # structured search misses "A ft. B" style credits; free text finds them
-        data = fetch({"q": f"{title} {primary_artist(artist)}"})
+        data = fetch({"q": f"{q_title} {primary_artist(artist)}"})
     path.write_text(json.dumps(data), encoding="utf-8")
     return data
 

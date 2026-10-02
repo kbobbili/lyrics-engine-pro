@@ -177,7 +177,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
             }
             State.panelTitle = panel.title;
             State.panelArtist = panel.artist;
-            LyricsController.get(this).onPanel(panel.title, panel.artist);
+            LyricsController.get(this).onPanel(panel.title, panel.artist, panel.progress);
             State.panelSeenRt = SystemClock.elapsedRealtime();
         }
         if (panel.progress != null && !panel.progress.equals(State.panelProgress)) {
