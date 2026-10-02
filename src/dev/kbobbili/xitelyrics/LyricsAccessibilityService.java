@@ -277,7 +277,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
     private static final String PANEL_ID = "channelDetailsRoot";
     private static final String UNSAVED = "Save Video", SAVED = "Video Saved";
     /** Keep the panel up this long after a save, so XITE's own "Saved to Library" pop-up is readable. */
-    private static final long SAVED_POPUP_MS = 8_000;
+    private static final long SAVED_POPUP_MS = 1_000;
     private static final long STEP_MS = 50, PANEL_WAIT_MS = 2_000, FOCUS_WAIT_MS = 1_500, CONFIRM_MAX_MS = 3_000;
 
     /** Polls check every STEP_MS until it returns true or timeoutMs passes, then calls done(ok). */
