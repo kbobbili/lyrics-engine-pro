@@ -122,8 +122,11 @@ public final class LyricsController {
         });
     }
 
+    /** Look this far ahead so a line's fade-in completes when the line starts. */
+    private static final long LEAD_MS = LyricsOverlay.FADE_MS;
+
     private void publish(long now) {
-        SyncEngine.Display d = engine.display(now);
+        SyncEngine.Display d = engine.display(now + LEAD_MS);
         String line = d.visible ? d.line : null;
         if (!Objects.equals(line, shownLine)) {
             shownLine = line;

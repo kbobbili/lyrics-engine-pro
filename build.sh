@@ -19,6 +19,8 @@ javac --release 17 -nowarn -cp "$JAR" -d out/classes \
     $(find out/classes -name '*.class')
 
 (cd out/dex && jar --update --no-manifest --file ../unsigned.apk classes.dex)
+# Assets via jar, not aapt2 -A: on Windows aapt2 stores backslash paths that Android can't open.
+jar --update --no-manifest --file out/unsigned.apk assets
 "$BT/zipalign.exe" -f 4 out/unsigned.apk out/aligned.apk
 "$BT/apksigner.bat" sign --ks "$KS" --ks-pass pass:android \
     --out out/xite-lyrics.apk out/aligned.apk

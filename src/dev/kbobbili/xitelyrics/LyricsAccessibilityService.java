@@ -69,6 +69,11 @@ public class LyricsAccessibilityService extends AccessibilityService {
     static final String ACTION_OVERLAY = "dev.kbobbili.xitelyrics.OVERLAY";
     /** Shows sample text for 5 s (layout check), whatever the overlay setting. */
     static final String ACTION_PREVIEW = "dev.kbobbili.xitelyrics.OVERLAY_PREVIEW";
+    /**
+     * Overlay style preset (persisted), see OverlayStyle.PRESETS:
+     *   am broadcast -a dev.kbobbili.xitelyrics.STYLE --ei style 2 -p dev.kbobbili.xitelyrics
+     */
+    static final String ACTION_STYLE = "dev.kbobbili.xitelyrics.STYLE";
     private static final String PREFS = "overlay";
     private LyricsOverlay overlay;
 
@@ -82,7 +87,13 @@ public class LyricsAccessibilityService extends AccessibilityService {
         @Override
         public void onReceive(Context c, Intent i) {
             if (ACTION_PREVIEW.equals(i.getAction())) {
-                previewOverlay();
+                previewOverlay(i.getStringExtra("text"), i.getIntExtra("seconds", 5));
+                return;
+            }
+            if (ACTION_STYLE.equals(i.getAction())) {
+                int idx = i.getIntExtra("style", 0);
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("style", idx).apply();
+                if (overlay != null) overlay.apply(style());
                 return;
             }
             if (ACTION_OVERLAY.equals(i.getAction())) {
@@ -111,6 +122,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
         IntentFilter f = new IntentFilter(ACTION_MARKER);
         f.addAction(ACTION_OVERLAY);
         f.addAction(ACTION_PREVIEW);
+        f.addAction(ACTION_STYLE);
         registerReceiver(markerReceiver, f, RECEIVER_EXPORTED);
         setOverlay(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("on", false));
         handler.post(poll);
@@ -214,17 +226,22 @@ public class LyricsAccessibilityService extends AccessibilityService {
         for (int i = 0; i < node.getChildCount(); i++) collect(node.getChild(i), panel, depth + 1);
     }
 
-    private void previewOverlay() {
-        LyricsOverlay o = new LyricsOverlay(this);
+    private OverlayStyle style() {
+        return OverlayStyle.get(getSharedPreferences(PREFS, MODE_PRIVATE).getInt("style", 0));
+    }
+
+    /** Sample text in the current style, whatever the overlay setting. */
+    private void previewOverlay(String text, int seconds) {
+        LyricsOverlay o = new LyricsOverlay(this, style());
         o.attach();
         o.onDisplay(dev.kbobbili.xitelyrics.sync.SyncEngine.Display.of(
-                "I've been waiting for the time of my life", "Now it's here, and I can't let it go"));
-        handler.postDelayed(o::detach, 5_000);
+                text != null ? text : "I've been waiting for the time of my life", null));
+        handler.postDelayed(o::detach, seconds * 1000L);
     }
 
     private void setOverlay(boolean on) {
         if (on) {
-            if (overlay == null) overlay = new LyricsOverlay(this);
+            if (overlay == null) overlay = new LyricsOverlay(this, style());
             overlay.attach();
             LyricsController.get(this).setDisplayListener(overlay);
         } else if (overlay != null) {
