@@ -4,6 +4,7 @@ Synced lyrics over the XITE music-video app on the Onn 4K Google TV Pro. The app
 audio, identifies the song and its position with Shazam's fingerprint (a pure-Java port of the
 SongRec algorithm), fetches synced lyrics from LRCLIB, and draws the current line over the video.
 
+- **How it works (start here):** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)
 - Design and phases: [docs/PLAN.md](docs/PLAN.md)
 - What's next: [future-roadmap.md](future-roadmap.md) (translations, menu hiding, open decisions)
 - Evidence per phase: [Phase 1](docs/PHASE1-RESULTS.md) · [Phase 2](docs/PHASE2-RESULTS.md) ·
