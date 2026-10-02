@@ -166,13 +166,29 @@ public class EngineTests {
         e = aligned(f);
         runTo(e, T0 + 7_500, T0 + 47_000);
         int[] c2 = f.captures.get(1);
-        e.onRecognition(c2[0], c2[1], T0 + 57_000, T0 + 65_000, fail(ShazamClient.Status.NO_MATCH, 0), T0 + 65_300);
-        check(e.display(T0 + 66_000).visible, "a missed lookup keeps the lyrics");
+        e.onRecognition(c2[0], c2[1], T0 + 57_000, T0 + 65_000, fail(ShazamClient.Status.ERROR, 0), T0 + 65_300);
+        check(e.display(T0 + 66_000).visible, "a network error keeps the lyrics");
         before = f.captures.size();
         runTo(e, T0 + 65_300, T0 + 80_200);
-        check(f.captures.size() == before, "no retry before 15 s after a miss");
+        check(f.captures.size() == before, "no retry before 15 s after a network error");
         e.tick(T0 + 80_300);
-        check(f.captures.size() == before + 1, "retry 15 s after a miss");
+        check(f.captures.size() == before + 1, "retry 15 s after a network error");
+
+        // No match while aligned = a scene/dialogue: hide, poll every 3 s, realign when music is back.
+        f = new Fake();
+        e = aligned(f);
+        runTo(e, T0 + 7_500, T0 + 47_000);
+        c2 = f.captures.get(1);
+        e.onRecognition(c2[0], c2[1], T0 + 47_000, T0 + 55_000, fail(ShazamClient.Status.NO_MATCH, 0), T0 + 55_300);
+        check(!e.display(T0 + 55_400).visible && f.logged("sync_music_lost"), "no match while aligned hides the lyrics");
+        before = f.captures.size();
+        runTo(e, T0 + 55_300, T0 + 58_300);
+        check(f.captures.size() == before + 1 && f.captures.get(before)[2] == 5_000, "polls with a 5 s clip 3 s later");
+        int[] c4 = f.captures.get(before);
+        // Music back after a 30 s scene: video 58.3 s now maps to song 28.8 s (delta -29.5 s).
+        e.onRecognition(c4[0], c4[1], T0 + 58_300, T0 + 63_300, match("Song", 28.8), T0 + 63_600);
+        check(e.mode() == SyncEngine.Mode.ALIGNED && Math.abs(e.deltaMs() + 29_500) < 1 && e.display(T0 + 64_000).visible,
+                "first match after the scene realigns directly (no confirmation needed)");
 
         // Freshness cap: no accepted clip for > 120 s hides.
         f = new Fake();

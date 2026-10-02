@@ -65,6 +65,12 @@ public final class SyncEngine {
     static final int FAST_CLIP_MS = 5_000;          // while acquiring
     static final int CLIP_MS = 8_000;               // once aligned (periodic checks, confirmations)
     static final long RETRY_WHILE_ACQUIRING = 500;
+    /**
+     * Shazam heard audio but no song while we were aligned: usually an acted scene or
+     * dialogue in the video (Choosin' Texas: 43 s and 28 s scenes). Hide and poll
+     * until the music is back; the first match then realigns directly.
+     */
+    static final long RETRY_WHILE_MUSIC_LOST = 3_000;
     static final long PROVISIONAL_MAX = 30_000;     // unconfirmed provisional lyrics give up
     static final long FIRST_CLIP_AFTER_JOIN = 2_000;
     static final long CLIP_PERIOD = 45_000;
@@ -113,6 +119,8 @@ public final class SyncEngine {
     private boolean pending;
     /** Showing lines at delta = 0 from the panel identity, before the first match. */
     private boolean provisional;
+    /** Lost the music mid-song (scene/dialogue); waiting for it to come back. */
+    private boolean musicLost;
 
     // Scheduling.
     private long nextCaptureRt = Long.MAX_VALUE;
@@ -264,7 +272,22 @@ public final class SyncEngine {
                 actions.log("sync_rate_limited", "waitMs", wait);
                 scheduleAt(now + wait);
                 break;
-            default:                                // NO_MATCH, ERROR
+            case NO_MATCH:
+                if (aligned) {
+                    // Audio without a song: a scene/dialogue, not a network blip. The song
+                    // position is unknown until the music returns, so stop showing lines.
+                    aligned = false;
+                    pending = false;
+                    musicLost = true;
+                    mode = Mode.ACQUIRING;
+                    actions.log("sync_music_lost");
+                    scheduleAt(now + RETRY_WHILE_MUSIC_LOST);
+                } else {
+                    actions.log("sync_miss", "status", r.status.name());
+                    scheduleAt(now + (musicLost ? RETRY_WHILE_MUSIC_LOST : RETRY_WHILE_ACQUIRING));
+                }
+                break;
+            default:                                // ERROR: network etc. Keep valid lyrics.
                 actions.log("sync_miss", "status", r.status.name(), "error", r.error);
                 scheduleAt(now + (aligned ? RETRY_AFTER_MISS : RETRY_WHILE_ACQUIRING));
         }
@@ -366,7 +389,8 @@ public final class SyncEngine {
         }
         if (!aligned) {
             pending = false;
-            accept(d, clipEndRt, "first");
+            accept(d, clipEndRt, musicLost ? "music_back" : "first");
+            musicLost = false;
             schedulePeriodic(firstSampleRt);
             return;
         }
@@ -434,6 +458,7 @@ public final class SyncEngine {
         pending = false;
         pendingTitle = null;
         provisional = false;
+        musicLost = false;
         agreements = 0;
         captureInFlight = false;
         nextCaptureRt = Long.MAX_VALUE;
