@@ -197,8 +197,27 @@ public final class LrcLibClient {
         String key = (Lrc.norm(artist) + "__" + Lrc.norm(title)).replaceAll("[^a-z0-9]+", "_");
         File cached = new File(cacheDir, key.substring(0, Math.min(120, key.length())) + ".json");
         if (cached.exists()) return new JSONArray(new String(Files.readAllBytes(cached.toPath()), StandardCharsets.UTF_8));
-        String url = baseUrl + "/api/search?track_name=" + URLEncoder.encode(title, "UTF-8")
-                + "&artist_name=" + URLEncoder.encode(artist, "UTF-8");
+        String primary = primaryArtist(artist);
+        String body = fetch(baseUrl + "/api/search?track_name=" + URLEncoder.encode(title, "UTF-8")
+                + "&artist_name=" + URLEncoder.encode(primary, "UTF-8"));
+        if (new JSONArray(body).length() == 0) {
+            // Structured search misses "A ft. B" style credits; free text finds them.
+            body = fetch(baseUrl + "/api/search?q=" + URLEncoder.encode(title + " " + primary, "UTF-8"));
+        }
+        cacheDir.mkdirs();
+        try (FileOutputStream o = new FileOutputStream(cached)) {
+            o.write(body.getBytes(StandardCharsets.UTF_8));
+        }
+        return new JSONArray(body);
+    }
+
+    /** "Tyla ft. Zara Larsson" -> "Tyla" (also feat./featuring/&/,/;/x/with). */
+    public static String primaryArtist(String artist) {
+        if (artist == null) return "";
+        return artist.split("(?i)\\s+(?:ft\\.?|feat\\.?|featuring|x|with)\\s+|\\s*[&,;]\\s*")[0].trim();
+    }
+
+    private String fetch(String url) throws IOException {
         IOException last = null;
         for (int attempt = 0; attempt <= retryWaitMs.length; attempt++) {
             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
@@ -207,15 +226,7 @@ public final class LrcLibClient {
                 c.setReadTimeout(15_000);
                 c.setRequestProperty("User-Agent", userAgent);
                 int code = c.getResponseCode();
-                if (code == 200) {
-                    String body = read(c.getInputStream());
-                    JSONArray arr = new JSONArray(body);
-                    cacheDir.mkdirs();
-                    try (FileOutputStream o = new FileOutputStream(cached)) {
-                        o.write(body.getBytes(StandardCharsets.UTF_8));
-                    }
-                    return arr;
-                }
+                if (code == 200) return read(c.getInputStream());
                 if (code < 500) throw new IOException("lrclib http " + code);
                 last = new IOException("lrclib http " + code);
             } catch (IOException e) {   // includes timeouts and TLS failures

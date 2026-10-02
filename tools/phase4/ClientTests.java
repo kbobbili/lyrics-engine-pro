@@ -89,6 +89,12 @@ public class ClientTests {
         check(Lrc.norm("Beyoncé (feat. JAY-Z)").equals("beyonce") && Lrc.norm("SHE DID IT AGAIN ft. Zara").equals("she did it again"),
                 "norm: accents, (feat.), ft. tails");
         check(Lrc.parse(null).isEmpty() && Lrc.parse("no stamps here").isEmpty(), "LRC: null / unstamped input");
+        check(LrcLibClient.primaryArtist("Tyla ft. Zara Larsson").equals("Tyla")
+                        && LrcLibClient.primaryArtist("KAROL G & Bruno Mars").equals("KAROL G")
+                        && LrcLibClient.primaryArtist("Tyla; Zara").equals("Tyla")
+                        && LrcLibClient.primaryArtist("Bruno Mars").equals("Bruno Mars")
+                        && LrcLibClient.primaryArtist("Silk Sonic with X").equals("Silk Sonic"),
+                "primary artist for LRCLIB search (ft./&/;/with)");
     }
 
     /** Local server that misbehaves on purpose: status codes, gzip, slowness. */

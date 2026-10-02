@@ -52,7 +52,20 @@ def search(title: str, artist: str) -> list[dict]:
     record_query(title, artist, path.name)
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
-    q = urllib.parse.urlencode({"track_name": title, "artist_name": artist})
+    data = fetch({"track_name": title, "artist_name": primary_artist(artist)})
+    if not data:   # structured search misses "A ft. B" style credits; free text finds them
+        data = fetch({"q": f"{title} {primary_artist(artist)}"})
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return data
+
+
+def primary_artist(artist: str) -> str:
+    """'Tyla ft. Zara Larsson' -> 'Tyla' (also feat./featuring/&/,/;/x/with)."""
+    return re.split(r"\s+(?:ft\.?|feat\.?|featuring|x|with)\s+|\s*[&,;]\s*", artist or "", flags=re.I)[0].strip()
+
+
+def fetch(params: dict) -> list:
+    q = urllib.parse.urlencode(params)
     req = urllib.request.Request(f"https://lrclib.net/api/search?{q}", headers={"User-Agent": UA})
     for attempt, wait in enumerate((2, 5, 10, None)):
         try:
@@ -67,7 +80,6 @@ def search(title: str, artist: str) -> list[dict]:
             if wait is None:
                 raise
             time.sleep(wait)
-    path.write_text(json.dumps(data), encoding="utf-8")
     return data
 
 
