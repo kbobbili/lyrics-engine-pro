@@ -31,7 +31,7 @@ modifying XITE. A laptop is only needed to build, install or debug it.
 | Lyrics client | `lyrics/LrcLibClient`, `Lrc` | Searches LRCLIB, picks the right upload (grouped by lyric timing; snippets and remix/live versions filtered; ambiguous cases left blank), retries outages, caches on the TV. |
 | Sync engine | `sync/SyncEngine` | The decision-maker: when to listen, which answers to trust, which line to show. Pure logic on an injected clock, so it's tested without a TV. |
 | Controller | `LyricsController` | Runs the engine on the main thread, records clips on the capture worker, fetches lyrics on their own thread, feeds the overlay. |
-| Overlay | `LyricsOverlay`, `OverlayStyle`, `TightTextView` | Draws the current line: Lexend semi-bold, compact centred block (≤ 45 % of the width, balanced wrap) at the bottom edge, no background box — a heavy soft shadow keeps it readable — and a 120 ms crossfade started early so lines are never late. |
+| Overlay | `LyricsOverlay`, `OverlayStyle`, `TightTextView` | Draws the current line: Lexend semi-bold, compact centred block (≤ 45 % of the width, balanced wrap, gap between lines cut to 45 % of the font default) at the bottom edge, no background box — a heavy soft shadow keeps it readable — and a 120 ms crossfade started early so lines are never late. |
 | Self-repair | `A11yRebinder` | If Android force-stops the app, re-enables only its own accessibility entry ~10 s later (other services such as AT4K untouched). |
 
 ## One song, start to finish

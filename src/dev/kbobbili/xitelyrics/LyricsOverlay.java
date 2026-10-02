@@ -69,14 +69,33 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
         line.setAllCaps(s.allCaps);
         line.setMaxLines(s.maxLines);
         line.setMaxWidth((int) (ctx.getResources().getDisplayMetrics().widthPixels * s.maxWidthFraction));
-        line.setLineSpacing(0, s.allCaps ? 1.08f : 1.0f);
         line.setTypeface(s.typeface(ctx));
         line.setTextSize(TypedValue.COMPLEX_UNIT_SP, s.textSp);
         line.setLetterSpacing(s.letterSpacing);
+        setTightLineHeight();
         line.setPadding(dp(s.padHdp), dp(s.padVdp), dp(s.padHdp), dp(s.padVdp));
         bg.setColor(Color.argb(s.boxAlpha, 0, 0, 0));
         bg.setCornerRadius(dp(s.cornerDp));
         Events.log("overlay_style", "name", s.name);
+    }
+
+    /** Share of the font's natural gap between wrapped lines that is kept (owner choice, 2026-10-02). */
+    private static final float LINE_GAP_KEEP = 0.45f;
+
+    /**
+     * The visible gap between two wrapped lines runs from one line's baseline to the top of
+     * the next line's capitals. Lexend's natural line height leaves a wide one; keep only
+     * LINE_GAP_KEEP of it. Glyph sizes are untouched.
+     */
+    private void setTightLineHeight() {
+        android.graphics.Paint.FontMetrics fm = line.getPaint().getFontMetrics();
+        android.graphics.Rect cap = new android.graphics.Rect();
+        line.getPaint().getTextBounds("H", 0, 1, cap);
+        float natural = fm.descent - fm.ascent, capHeight = cap.height();
+        int tight = Math.round(capHeight + LINE_GAP_KEEP * (natural - capHeight));
+        line.setLineHeight(tight);
+        Events.log("overlay_line_height", "naturalPx", Math.round(natural), "capPx", Math.round(capHeight),
+                "linePx", tight);
     }
 
     private int dp(int v) {
