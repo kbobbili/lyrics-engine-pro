@@ -58,6 +58,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
     /** Every package with a HOME activity (the TV also lists its setup wizard). */
     private final Set<String> launcherPkgs = new HashSet<>();
     private long lastLaunchRt = -BACKOFF_MAX_MS;
+    private int awayReads;
     private View marker;
 
     static final String ACTION_MARKER = "dev.kbobbili.xitelyrics.MARKER";
@@ -138,7 +139,18 @@ public class LyricsAccessibilityService extends AccessibilityService {
             }
             if (isXite) collect(root, panel, 0);
         }
-        boolean xiteFront = fg != null && fg;
+        // Some reads on this TV return no application window at all: that is "unknown",
+        // not "XITE left". A real departure must also show in two consecutive reads
+        // (and XITE kills itself when it leaves, which ends its media session anyway).
+        boolean xiteFront;
+        if (fg == null) {
+            xiteFront = State.xiteForeground;
+        } else if (fg) {
+            awayReads = 0;
+            xiteFront = true;
+        } else {
+            xiteFront = ++awayReads >= 2 ? false : State.xiteForeground;
+        }
 
         if (xiteFront != State.xiteForeground) {
             State.xiteForeground = xiteFront;
