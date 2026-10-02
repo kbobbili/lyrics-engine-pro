@@ -274,91 +274,91 @@ public class LyricsAccessibilityService extends AccessibilityService {
     // XITE's info panel: "Save Video" becomes "Video Saved" once saved (checked 2026-10-02).
     private static final String SAVE_ID = "channelDetailsButtonsLikeVideo";
     private static final String OPEN_PANEL_ID = "openMenuButton";
+    private static final String PANEL_ID = "channelDetailsRoot";
     private static final String UNSAVED = "Save Video", SAVED = "Video Saved";
-    private static final long PANEL_WAIT_MS = 2_000, SETTLE_MS = 700, CONFIRM_POLL_MS = 250, CONFIRM_MAX_MS = 3_000;
+    private static final long STEP_MS = 50, PANEL_WAIT_MS = 2_000, FOCUS_WAIT_MS = 1_500, CONFIRM_MAX_MS = 3_000;
+
+    /** Polls check every STEP_MS until it returns true or timeoutMs passes, then calls done(ok). */
+    private void pollUntil(java.util.function.BooleanSupplier check, long timeoutMs,
+            java.util.function.Consumer<Boolean> done) {
+        long deadline = SystemClock.uptimeMillis() + timeoutMs;
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (check.getAsBoolean()) done.accept(true);
+                else if (SystemClock.uptimeMillis() >= deadline) done.accept(false);
+                else handler.postDelayed(this, STEP_MS);
+            }
+        });
+    }
 
     /**
-     * Star: save the playing video to the XITE library, like pressing OK then Save.
-     * Clicks only a button that reads "Save Video", so it can never un-save.
+     * Star: save the playing video to the XITE library, as quickly and invisibly as XITE
+     * allows. Its Save button only exists in the info panel, so: open the panel, highlight
+     * Save, press OK, and close the panel again with Back as soon as XITE confirms.
+     * Presses OK only on a focused "Save Video" (never un-saves, never hits another
+     * control) and Back only while the panel is confirmed open (never exits XITE).
      */
     private void starPressed() {
-        AccessibilityNodeInfo save = findXiteNode(SAVE_ID);
-        if (save != null) {
-            saveVia(save);
+        long t0 = SystemClock.uptimeMillis();
+        if (findXiteNode(SAVE_ID) != null) {          // owner already has the panel open: leave it open
+            saveVia(t0, false);
             return;
         }
         AccessibilityNodeInfo open = findXiteNode(OPEN_PANEL_ID);
         if (open == null || !open.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             Events.log("star_save", "result", "no_panel");
-            LyricsController.get(this).notice("Couldn't open XITE's panel");
-            return;
-        }
-        long deadline = SystemClock.uptimeMillis() + PANEL_WAIT_MS;
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                AccessibilityNodeInfo n = findXiteNode(SAVE_ID);
-                if (n != null) {
-                    // let the panel finish sliding in before pressing anything
-                    handler.postDelayed(() -> {
-                        AccessibilityNodeInfo fresh = findXiteNode(SAVE_ID);
-                        if (fresh != null) saveVia(fresh);
-                    }, SETTLE_MS);
-                } else if (SystemClock.uptimeMillis() < deadline) {
-                    handler.postDelayed(this, 150);
-                } else {
-                    Events.log("star_save", "result", "save_button_missing");
-                    LyricsController.get(LyricsAccessibilityService.this).notice("Couldn't find Save");
-                }
-            }
-        }, 150);
-    }
-
-    private void saveVia(AccessibilityNodeInfo save) {
-        String label = String.valueOf(save.getContentDescription());
-        if (SAVED.equals(label)) {
-            Events.log("star_save", "result", "already_saved");
-            LyricsController.get(this).notice("Already saved");
-            return;
-        }
-        if (!UNSAVED.equals(label)) {   // unknown state: never guess
-            Events.log("star_save", "result", "unknown_label", "label", label);
             LyricsController.get(this).notice("Couldn't save");
             return;
         }
-        StringBuilder acts = new StringBuilder();
-        for (AccessibilityNodeInfo.AccessibilityAction a : save.getActionList()) {
-            acts.append(a.getId()).append(a.getLabel() != null ? ":" + a.getLabel() : "").append(' ');
-        }
-        // XITE's buttons react to the remote's OK on the highlighted control, not to an
-        // accessibility click. So: highlight Save, re-read it, and only if it is really the
-        // focused "Save Video" press OK (D-pad centre, Android 13+). Never press OK on
-        // anything else.
-        save.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-        handler.postDelayed(() -> {
-            AccessibilityNodeInfo n = findXiteNode(SAVE_ID);
-            boolean ready = n != null && n.isFocused()
-                    && UNSAVED.contentEquals(String.valueOf(n.getContentDescription()));
-            boolean pressed = ready && performGlobalAction(GLOBAL_ACTION_DPAD_CENTER);
-            Events.log("star_save_press", "ready", ready, "pressed", pressed, "actions", acts.toString());
-            if (!pressed) {
+        pollUntil(() -> findXiteNode(SAVE_ID) != null, PANEL_WAIT_MS, ok -> {
+            if (ok) {
+                saveVia(t0, true);
+            } else {
+                Events.log("star_save", "result", "save_button_missing");
                 LyricsController.get(this).notice("Couldn't save");
-                return;
             }
-            confirmSaved(SystemClock.uptimeMillis() + CONFIRM_MAX_MS);
-        }, 250);
+        });
     }
 
-    private void confirmSaved(long deadline) {
-        AccessibilityNodeInfo after = findXiteNode(SAVE_ID);
-        boolean ok = after != null && SAVED.contentEquals(String.valueOf(after.getContentDescription()));
-        if (ok || SystemClock.uptimeMillis() >= deadline) {
-            Events.log("star_save", "result", ok ? "saved" : "unconfirmed");
-            // On success XITE shows its own "Saved to Library" message; only speak up on failure.
-            if (!ok) LyricsController.get(this).notice("Couldn't save");
+    private void saveVia(long t0, boolean weOpenedPanel) {
+        AccessibilityNodeInfo save = findXiteNode(SAVE_ID);
+        String label = save == null ? null : String.valueOf(save.getContentDescription());
+        if (SAVED.equals(label)) {
+            finishStar(t0, weOpenedPanel, "already_saved", "Already saved");
             return;
         }
-        handler.postDelayed(() -> confirmSaved(deadline), CONFIRM_POLL_MS);
+        if (!UNSAVED.equals(label)) {   // unknown state: never guess
+            finishStar(t0, weOpenedPanel, "unknown_label:" + label, "Couldn't save");
+            return;
+        }
+        save.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+        pollUntil(() -> {
+            AccessibilityNodeInfo n = findXiteNode(SAVE_ID);
+            return n != null && n.isFocused() && UNSAVED.contentEquals(String.valueOf(n.getContentDescription()));
+        }, FOCUS_WAIT_MS, focused -> {
+            if (!focused || !performGlobalAction(GLOBAL_ACTION_DPAD_CENTER)) {
+                finishStar(t0, weOpenedPanel, "not_focused", "Couldn't save");
+                return;
+            }
+            long pressedAt = SystemClock.uptimeMillis();
+            pollUntil(() -> {
+                AccessibilityNodeInfo n = findXiteNode(SAVE_ID);
+                return n != null && SAVED.contentEquals(String.valueOf(n.getContentDescription()));
+            }, CONFIRM_MAX_MS, saved -> {
+                Events.log("star_timing", "toPressMs", pressedAt - t0, "toConfirmMs", SystemClock.uptimeMillis() - t0);
+                finishStar(t0, weOpenedPanel, saved ? "saved" : "unconfirmed",
+                        saved ? "Saved to library" : "Couldn't save");
+            });
+        });
+    }
+
+    /** Close the panel we opened (Back, only if it is still up), then confirm on screen. */
+    private void finishStar(long t0, boolean weOpenedPanel, String result, String note) {
+        boolean closed = false;
+        if (weOpenedPanel && findXiteNode(PANEL_ID) != null) closed = performGlobalAction(GLOBAL_ACTION_BACK);
+        Events.log("star_save", "result", result, "panelClosed", closed, "totalMs", SystemClock.uptimeMillis() - t0);
+        LyricsController.get(this).notice(note);
     }
 
     /**
