@@ -36,6 +36,7 @@ import java.util.Set;
  */
 public class LyricsAccessibilityService extends AccessibilityService {
     private static final long POLL_MS = 2000;
+    private static final long FAST_POLL_MS = 500;
     private static final long DEBOUNCE_MS = 300;
     private static final long BACKOFF_MIN_MS = 60_000;
     private static final long BACKOFF_MAX_MS = 15 * 60_000;
@@ -48,7 +49,9 @@ public class LyricsAccessibilityService extends AccessibilityService {
         @Override
         public void run() {
             read();
-            handler.postDelayed(this, POLL_MS);
+            // Poll faster while capture is missing, so a quick pass through the home
+            // screen (e.g. waking the TV and opening XITE) is enough to start it.
+            handler.postDelayed(this, State.captureRunning ? POLL_MS : FAST_POLL_MS);
         }
     };
 
