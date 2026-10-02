@@ -58,6 +58,15 @@ public class LyricsAccessibilityService extends AccessibilityService {
     private View marker;
 
     static final String ACTION_MARKER = "dev.kbobbili.xitelyrics.MARKER";
+    /**
+     * Lyrics overlay on/off (persisted, default off):
+     *   am broadcast -a dev.kbobbili.xitelyrics.OVERLAY --ez on true -p dev.kbobbili.xitelyrics
+     */
+    static final String ACTION_OVERLAY = "dev.kbobbili.xitelyrics.OVERLAY";
+    /** Shows sample text for 5 s (layout check), whatever the overlay setting. */
+    static final String ACTION_PREVIEW = "dev.kbobbili.xitelyrics.OVERLAY_PREVIEW";
+    private static final String PREFS = "overlay";
+    private LyricsOverlay overlay;
 
     /**
      * Calibration: flashes a white square (top-left) "count" times, every
@@ -68,6 +77,16 @@ public class LyricsAccessibilityService extends AccessibilityService {
     private final BroadcastReceiver markerReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
+            if (ACTION_PREVIEW.equals(i.getAction())) {
+                previewOverlay();
+                return;
+            }
+            if (ACTION_OVERLAY.equals(i.getAction())) {
+                boolean on = i.getBooleanExtra("on", true);
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("on", on).apply();
+                setOverlay(on);
+                return;
+            }
             flashMarker(i.getIntExtra("count", 20), i.getIntExtra("periodMs", 2000),
                     i.getIntExtra("onMs", 300));
         }
@@ -85,7 +104,11 @@ public class LyricsAccessibilityService extends AccessibilityService {
             launcherPkgs.add(r.activityInfo.packageName);
         }
         Events.log("launchers", "pkgs", launcherPkgs.toString());
-        registerReceiver(markerReceiver, new IntentFilter(ACTION_MARKER), RECEIVER_EXPORTED);
+        IntentFilter f = new IntentFilter(ACTION_MARKER);
+        f.addAction(ACTION_OVERLAY);
+        f.addAction(ACTION_PREVIEW);
+        registerReceiver(markerReceiver, f, RECEIVER_EXPORTED);
+        setOverlay(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("on", false));
         handler.post(poll);
     }
 
@@ -176,6 +199,26 @@ public class LyricsAccessibilityService extends AccessibilityService {
         for (int i = 0; i < node.getChildCount(); i++) collect(node.getChild(i), panel, depth + 1);
     }
 
+    private void previewOverlay() {
+        LyricsOverlay o = new LyricsOverlay(this);
+        o.attach();
+        o.onDisplay(dev.kbobbili.xitelyrics.sync.SyncEngine.Display.of(
+                "I've been waiting for the time of my life", "Now it's here, and I can't let it go"));
+        handler.postDelayed(o::detach, 5_000);
+    }
+
+    private void setOverlay(boolean on) {
+        if (on) {
+            if (overlay == null) overlay = new LyricsOverlay(this);
+            overlay.attach();
+            LyricsController.get(this).setDisplayListener(overlay);
+        } else if (overlay != null) {
+            LyricsController.get(this).setDisplayListener(null);
+            overlay.detach();
+        }
+        Events.log("overlay_setting", "on", on);
+    }
+
     private void flashMarker(int count, int periodMs, int onMs) {
         WindowManager wm = getSystemService(WindowManager.class);
         if (marker == null) {
@@ -219,6 +262,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         State.a11yConnected = false;
+        if (overlay != null) overlay.detach();
         Events.log("a11y_unbound");
         return false;
     }

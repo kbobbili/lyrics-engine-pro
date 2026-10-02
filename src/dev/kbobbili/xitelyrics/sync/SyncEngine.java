@@ -42,6 +42,11 @@ public final class SyncEngine {
         public final boolean visible;
         public final String line, next;
 
+        /** A visible display with fixed text (overlay previews and tests). */
+        public static Display of(String line, String next) {
+            return new Display(true, line, next);
+        }
+
         Display(boolean visible, String line, String next) {
             this.visible = visible;
             this.line = line;
