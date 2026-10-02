@@ -48,6 +48,10 @@ public class PlaybackWatcher extends NotificationListenerService {
                 FingerprintSelfTest.run(PlaybackWatcher.this);
                 return;
             }
+            if (ClientSelfTest.ACTION.equals(i.getAction())) {
+                ClientSelfTest.run(PlaybackWatcher.this);
+                return;
+            }
             String cmd = i.getStringExtra("cmd");
             Events.log("transport", "cmd", cmd, "attached", controller != null);
             if (controller == null) return;
@@ -87,6 +91,7 @@ public class PlaybackWatcher extends NotificationListenerService {
         msm = getSystemService(MediaSessionManager.class);
         IntentFilter debug = new IntentFilter(ACTION_TRANSPORT);
         debug.addAction(FingerprintSelfTest.ACTION);
+        debug.addAction(ClientSelfTest.ACTION);
         registerReceiver(transport, debug, RECEIVER_EXPORTED);
         ComponentName me = new ComponentName(this, PlaybackWatcher.class);
         msm.addOnActiveSessionsChangedListener(sessionsListener, me, handler);

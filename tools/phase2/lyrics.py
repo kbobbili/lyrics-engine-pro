@@ -49,6 +49,7 @@ def search(title: str, artist: str) -> list[dict]:
     CACHE.mkdir(parents=True, exist_ok=True)
     key = re.sub(r"[^a-z0-9]+", "_", f"{norm(artist)}__{norm(title)}")[:120]
     path = CACHE / f"{key}.json"
+    record_query(title, artist, path.name)
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     q = urllib.parse.urlencode({"track_name": title, "artist_name": artist})
@@ -68,6 +69,15 @@ def search(title: str, artist: str) -> list[dict]:
             time.sleep(wait)
     path.write_text(json.dumps(data), encoding="utf-8")
     return data
+
+
+def record_query(title: str, artist: str, file: str) -> None:
+    """Remember which title/artist produced each cache file (for the Java equivalence test)."""
+    qpath = Path("analysis/lrclib_queries.json")
+    qs = json.loads(qpath.read_text(encoding="utf-8")) if qpath.exists() else []
+    if not any(q["file"] == file for q in qs):
+        qs.append({"title": title, "artist": artist, "file": file})
+        qpath.write_text(json.dumps(qs, indent=1), encoding="utf-8")
 
 
 @dataclass

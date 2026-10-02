@@ -39,7 +39,9 @@ public final class Events {
             o.put("wall", System.currentTimeMillis());
             o.put("type", type);
             for (int i = 0; i + 1 < kv.length; i += 2) {
-                o.put(String.valueOf(kv[i]), kv[i + 1] == null ? JSONObject.NULL : kv[i + 1]);
+                Object v = kv[i + 1];
+                if (v instanceof Double && (((Double) v).isNaN() || ((Double) v).isInfinite())) v = null;
+                o.put(String.valueOf(kv[i]), v == null ? JSONObject.NULL : v);
             }
         } catch (JSONException e) {
             Log.w(TAG, "bad event " + type, e);
