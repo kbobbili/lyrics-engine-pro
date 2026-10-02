@@ -48,7 +48,9 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
         next = text(ctx, 22, Color.argb(170, 255, 255, 255), Typeface.NORMAL, maxW);
         box.addView(current);
         box.addView(next);
-        box.setVisibility(View.GONE);
+        // INVISIBLE, never GONE: a GONE box shrinks the window to zero height, and Android
+        // then stops redrawing it, so the last line stays on screen after "hiding".
+        box.setVisibility(View.INVISIBLE);
         // Full-width window with the box centred in it: a WRAP_CONTENT window is first
         // measured at dialog width, which makes long lines wrap needlessly.
         root = new FrameLayout(ctx);
@@ -105,7 +107,7 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
         shownLine = line;
         shownNext = nxt;
         if (line == null) {
-            box.setVisibility(View.GONE);
+            box.setVisibility(View.INVISIBLE);
             return;
         }
         current.setText(line);
