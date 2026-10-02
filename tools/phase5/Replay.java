@@ -198,6 +198,8 @@ public class Replay {
             }
         };
         SyncEngine e = new SyncEngine(actions);
+        String period = System.getenv("CLIP_PERIOD_MS");   // B comparison
+        if (period != null) e.setClipPeriodMs(Long.parseLong(period));
         eng[0] = e;
 
         int ei = 0;
@@ -238,7 +240,7 @@ public class Replay {
         JSONObject out = new JSONObject().put("timeline", new JSONArray(timeline))
                 .put("shazamNetworkCalls", networkCalls).put("shazamCacheHits", cacheHits)
                 .put("capturesPerGen", new JSONObject(calls));
-        Path outPath = Path.of("analysis", dir.getFileName() + "-replay.json");
+        Path outPath = Path.of("analysis", dir.getFileName() + "-replay" + (period != null ? "-" + period : "") + ".json");
         Files.writeString(outPath, out.toString(1));
         System.out.printf("replayed %.1f min: %d display changes, Shazam cache hits %d, network calls %d -> %s%n",
                 (endRt - startRt) / 60000, timeline.stream().filter(o -> o.getString("type").equals("display")).count(),

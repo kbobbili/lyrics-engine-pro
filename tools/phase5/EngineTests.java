@@ -68,6 +68,7 @@ public class EngineTests {
     /** Engine with XITE in front, a song started at T0 (position 0) and its panel at +1.5 s. */
     static SyncEngine songStarted(Fake f) {
         SyncEngine e = new SyncEngine(f);
+        e.setClipPeriodMs(45_000);   // scenarios below were written for a 45 s rhythm; 30 s tested separately
         e.onSession(true, T0 - 5_000);
         e.onForeground(true, T0 - 5_000);
         e.onPlayback(BUFFERING, 0, T0 - 500, 0f, T0 - 500);
@@ -91,6 +92,7 @@ public class EngineTests {
     }
 
     public static void main(String[] args) throws Exception {
+        int[] fc0;
         Fake f = new Fake();
         SyncEngine e = songStarted(f);
         runTo(e, T0, T0 + 1_900);
@@ -214,11 +216,13 @@ public class EngineTests {
         runTo(e, T0 + 7_500, T0 + 47_000);
         c2 = f.captures.get(1);
         e.onRecognition(c2[0], c2[1], T0 + 57_000, T0 + 65_000, match("Song", 67.5), T0 + 65_300); // +10 s
-        check(e.mode() == SyncEngine.Mode.CONFIRMING && !e.display(T0 + 65_500).visible, "conflicting match hides and confirms");
+        check(e.mode() == SyncEngine.Mode.CONFIRMING && e.display(T0 + 65_500).visible && Math.abs(e.deltaMs() - 10_500) < 1,
+                "conflicting match switches to the new timing at once (and confirms)");
         runTo(e, T0 + 65_300, T0 + 70_300);
         int[] c3 = f.captures.get(f.captures.size() - 1);
         e.onRecognition(c3[0], c3[1], T0 + 70_300, T0 + 78_300, match("Song", 70.8), T0 + 78_600);   // old delta
-        check(e.mode() == SyncEngine.Mode.ALIGNED && Math.abs(e.deltaMs() - 500) < 1, "old alignment confirmed -> restored");
+        check(e.mode() == SyncEngine.Mode.ALIGNED && Math.abs(e.deltaMs() - 500) < 1 && f.logged("sync_reverted"),
+                "old alignment confirmed -> reverted to it");
 
         // Conflict confirmed twice -> realign (real edit).
         f = new Fake();
@@ -301,6 +305,29 @@ public class EngineTests {
         f = new Fake();
         e = aligned(f);
         check(!e.display(T0 + 40_000).visible, "blank LRC line (instrumental gap) hides");
+
+        // B: default rhythm is a check every 30 s once aligned.
+        f = new Fake();
+        e = songStarted(f);
+        e.setClipPeriodMs(30_000);
+        runTo(e, T0, T0 + 2_000);
+        fc0 = f.captures.get(0);
+        e.onRecognition(fc0[0], fc0[1], T0 + 2_000, T0 + 7_000, match("Song", 2.5), T0 + 7_300);
+        runTo(e, T0 + 7_300, T0 + 31_900);
+        check(f.captures.size() == 1, "no routine check before 30 s after the first clip");
+        e.tick(T0 + 32_000);
+        check(f.captures.size() == 2, "routine check 30 s after the first clip");
+
+        // A: a conflict that is not confirmed either way hides until two clips agree.
+        f = new Fake();
+        e = aligned(f);
+        runTo(e, T0 + 7_500, T0 + 47_000);
+        fc0 = f.captures.get(1);
+        e.onRecognition(fc0[0], fc0[1], T0 + 57_000, T0 + 65_000, match("Song", 67.5), T0 + 65_300);   // +10 s
+        runTo(e, T0 + 65_300, T0 + 70_300);
+        fc0 = f.captures.get(f.captures.size() - 1);
+        e.onRecognition(fc0[0], fc0[1], T0 + 70_300, T0 + 78_300, match("Song", 50.3), T0 + 78_600);   // -20 s
+        check(!e.display(T0 + 78_700).visible, "third different timing: hidden until confirmed");
 
         // Fast start: provisional lines from the panel identity before the first match.
         f = new Fake();

@@ -21,7 +21,8 @@ from session import Session  # noqa: E402
 folder = Path(sys.argv[1].rstrip("/"))
 sid = folder.name
 sess = Session(folder, folder.parent.parent / "events.jsonl")
-rep = json.loads(Path(f"analysis/{sid}-replay.json").read_text())
+suffix = sys.argv[2] if len(sys.argv) > 2 else ""
+rep = json.loads(Path(f"analysis/{sid}-replay{suffix}.json").read_text())
 tl = rep["timeline"]
 dense = json.loads(Path(f"analysis/{sid}-dense.json").read_text())
 

@@ -79,7 +79,12 @@ public final class SyncEngine {
      */
     static final double INTRO_MIN_S = 3, INTRO_MAX_S = 15;
     static final long FIRST_CLIP_AFTER_JOIN = 2_000;
-    static final long CLIP_PERIOD = 45_000;
+    /**
+     * Routine check spacing once aligned. 30 s (was 45 s): phase-averaged over the
+     * recorded evening, wrong-lyric time after video edits fell 104 s -> 79 s, for
+     * ~8 Shazam calls per song instead of ~5 (no rate limits seen in ~640 calls).
+     */
+    static final long CLIP_PERIOD = 30_000;
     /** Edits cluster (Homewrecker: two cuts ~15 s apart), so look again soon after one. */
     static final long RECHECK_AFTER_EDIT = 15_000;
     static final long RETRY_AFTER_MISS = 15_000;
@@ -123,6 +128,11 @@ public final class SyncEngine {
     private long lastAcceptedClipEndRt;
     private int agreements;
     private double pendingDeltaMs;
+    /** Delta before a conflict switched us to pendingDeltaMs (restored if the old one is confirmed). */
+    private double prevDeltaMs;
+    /** In CONFIRMING: true while showing the tentatively adopted new timing. */
+    private boolean showTentative;
+    private long clipPeriodMs = CLIP_PERIOD;
     private boolean pending;
     /** Showing lines at delta = 0 from the panel identity, before the first match. */
     private boolean provisional;
@@ -147,6 +157,12 @@ public final class SyncEngine {
     public void setDevicePipelineOffsetMs(long ms) {
         devicePipelineOffsetMs = ms;
     }
+
+    /** Spacing of routine checks once aligned (default 30 s). */
+    public void setClipPeriodMs(long ms) {
+        clipPeriodMs = ms;
+    }
+
 
     public Mode mode() {
         return mode;
@@ -237,6 +253,8 @@ public final class SyncEngine {
             double c = newPosition - expected;
             if (aligned && Math.abs(c) >= 1) {
                 deltaMs -= c;
+                prevDeltaMs -= c;
+                pendingDeltaMs -= c;
                 actions.log("sync_rebase", "correctionMs", c, "deltaMs", deltaMs);
             }
             return;
@@ -365,7 +383,8 @@ public final class SyncEngine {
     public Display display(long now) {
         boolean tentative = !aligned && provisional;
         if (!foreground || lines == null || !(aligned || tentative)) return Display.HIDDEN;
-        if (mode != Mode.ALIGNED && mode != Mode.PAUSED && !(tentative && mode == Mode.ACQUIRING)) {
+        if (mode != Mode.ALIGNED && mode != Mode.PAUSED && !(tentative && mode == Mode.ACQUIRING)
+                && !(mode == Mode.CONFIRMING && showTentative)) {
             return Display.HIDDEN;
         }
         if (mode == Mode.PAUSED && state != STATE_PAUSED) return Display.HIDDEN;   // buffering etc.
@@ -412,24 +431,46 @@ public final class SyncEngine {
             schedulePeriodic(firstSampleRt);
             return;
         }
+        if (pending) {
+            if (Math.abs(d - pendingDeltaMs) <= AGREE_MS) {
+                actions.log("sync_realigned", "fromMs", prevDeltaMs, "toMs", d);
+                accept(d, clipEndRt, "new_confirmed");
+                pending = false;
+                showTentative = false;
+                scheduleAt(now + RECHECK_AFTER_EDIT);
+                return;
+            }
+            if (Math.abs(d - prevDeltaMs) <= AGREE_MS) {
+                actions.log("sync_reverted", "toMs", d);
+                accept(d, clipEndRt, "old_confirmed");
+                pending = false;
+                showTentative = false;
+                schedulePeriodic(firstSampleRt);
+                return;
+            }
+            // Agrees with neither: hide until two clips agree.
+            pendingDeltaMs = d;
+            showTentative = false;
+            mode = Mode.CONFIRMING;
+            actions.log("sync_conflict", "deltaMs", deltaMs, "newMs", d, "timeskew", r.timeskew, "shown", false);
+            scheduleAt(now + CONFIRM_AFTER_CONFLICT);
+            return;
+        }
         if (Math.abs(d - deltaMs) <= AGREE_MS) {
-            accept(d, clipEndRt, pending ? "old_confirmed" : "agree");
-            pending = false;
+            accept(d, clipEndRt, "agree");
             schedulePeriodic(firstSampleRt);
             return;
         }
-        if (pending && Math.abs(d - pendingDeltaMs) <= AGREE_MS) {
-            actions.log("sync_realigned", "fromMs", deltaMs, "toMs", d);
-            accept(d, clipEndRt, "new_confirmed");
-            pending = false;
-            scheduleAt(now + RECHECK_AFTER_EDIT);
-            return;
-        }
-        // Conflict (repeated chorus or a real edit): hide and confirm quickly.
+        // Conflict. On real data every jump so far was a genuine video edit (no false
+        // repeated-chorus matches in ~300 checks), so adopt the new timing at once and
+        // confirm it; revert if the next clip agrees with the old timing instead.
         pending = true;
+        prevDeltaMs = deltaMs;
         pendingDeltaMs = d;
+        deltaMs = d;
+        showTentative = true;
         mode = Mode.CONFIRMING;
-        actions.log("sync_conflict", "deltaMs", deltaMs, "newMs", d, "timeskew", r.timeskew);
+        actions.log("sync_conflict", "deltaMs", prevDeltaMs, "newMs", d, "timeskew", r.timeskew, "shown", true);
         scheduleAt(now + CONFIRM_AFTER_CONFLICT);
     }
 
@@ -447,7 +488,7 @@ public final class SyncEngine {
     }
 
     private void schedulePeriodic(long firstSampleRt) {
-        scheduleAt(firstSampleRt + CLIP_PERIOD);
+        scheduleAt(firstSampleRt + clipPeriodMs);
     }
 
     private void scheduleAt(long rt) {
@@ -478,6 +519,7 @@ public final class SyncEngine {
         pendingTitle = null;
         provisional = false;
         musicLost = false;
+        showTentative = false;
         agreements = 0;
         captureInFlight = false;
         nextCaptureRt = Long.MAX_VALUE;
