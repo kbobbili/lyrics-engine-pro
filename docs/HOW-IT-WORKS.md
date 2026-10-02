@@ -96,7 +96,7 @@ Android's audio system, and Shazam's offset refers to that sample.
 | Button | Action |
 |---|---|
 | **TV icon** (below D-pad right; Android `GUIDE`) | Lyrics on/off. Off also stops listening (no Shazam calls); on resyncs ~2 s later. Remembered across reboots; a brief "Lyrics off/on" note confirms. |
-| **Star** (Google TV "magic button"; Android `MACRO_1`) | Save the playing video to the XITE library: briefly opens XITE's info panel (the only place its Save button exists), highlights **Save Video**, presses OK, and closes the panel again with Back once the save is confirmed — after a 4.5 s pause, so XITE's own "Saved to Library" pop-up (the only confirmation) stays readable. If the owner already had the panel open, it stays open. If the button already reads **Video Saved**, nothing is pressed ("Already saved") — it can never un-save. |
+| **Star** (Google TV "magic button"; Android `MACRO_1`) | Save the playing video to the XITE library: briefly opens XITE's info panel (the only place its Save button exists), highlights **Save Video**, presses OK, and closes the panel again with Back once the save is confirmed — after an 8 s pause, so XITE's own "Saved to Library" pop-up (the only confirmation) stays readable. If the owner already had the panel open, it stays open. If the button already reads **Video Saved**, nothing is pressed ("Already saved") — it can never un-save. |
 
 On the home screen both buttons keep their normal jobs, and every other key always passes through
 untouched. How it works: the accessibility service may filter key events, and acts on these two
