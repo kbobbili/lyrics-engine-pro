@@ -35,7 +35,7 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
     private String shown;
     private boolean added;
     private long noticeUntil;
-    private static final long NOTICE_MS = 1_500;
+    private static final long NOTICE_MS = 3_000;
     private int bottomDp = 56;
 
     LyricsOverlay(Context ctx, OverlayStyle style) {
