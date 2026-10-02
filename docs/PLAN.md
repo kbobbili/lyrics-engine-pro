@@ -6,8 +6,21 @@ XITE (music-video app on the Onn 4K Google TV Pro, Android 14 / API 34) has no l
 for most songs. XITE itself can't be modified, so the goal is a companion app on the TV that
 detects the current song, fetches synced lyrics, and draws 1–2 subtitle-style lines over the video.
 
-**Status: ready for a feasibility spike; the full build depends on capture and end-to-end alignment
-passing the gates below. This revision adds requirements, not new device-test results.**
+**Status (2026-10-02): Phases 0 and 1 complete — all three Phase 1 gates passed on the device.
+Next: Phase 2 (end-to-end alignment spike). Results and evidence: `docs/PHASE1-RESULTS.md` in the repo.**
+
+**Phase 1 findings that constrain the design:**
+- **XITE kills its own process ~0.7 s after any activity pauses it.** Nothing may ever open over
+  XITE. The projection is requested only when a launcher is the top app, and kept alive by the
+  foreground service; if it is lost mid-XITE, lyrics wait until the next visit to the home screen.
+- **Silent consent works** with `PROJECT_MEDIA allow` **plus `appops write-settings`** (else a reboot
+  can drop the op). Auto-approved in 82–189 ms, including 28 s after a reboot.
+- **Force-stop drops our accessibility entry**; PlaybackWatcher re-adds only our entry
+  (adb-granted `WRITE_SECURE_SETTINGS`), preserving AT4K.
+- **Ad boundaries are observable:** each item change is STOPPED → BUFFERING → PLAYING with position 0;
+  songs show the panel ~1.6 s later, ads don't, and the ad clip got no Shazam match.
+- **Repeated sections:** one Dracula clip matched 100 s earlier in the song with 10× the usual
+  timeskew — likely a repeated chorus matched to its first occurrence. Phase 2 must handle this.
 
 Reported observations from the investigation (2026-10-01):
 - **Song identity** is readable via an AccessibilityService. XITE shows an info panel automatically
@@ -124,9 +137,10 @@ Every capture, recognition and lyrics request carries its generation and relevan
 identity. Check these before applying results; cancellation alone does not prevent late callbacks.
 Invalidate in-flight work on broken playback continuity even when the title stays unchanged.
 
-Determine actual ad-boundary signals during the spike. If ads have no distinguishable panel/session
-transition, immediate hiding is an unmet requirement: record detection delay and investigate a better
-signal. Neither missing text nor a failed match proves an ad. Foreground detection must distinguish
+Ad-boundary signal (Phase 1): every item change is a STOPPED → BUFFERING → PLAYING transition with
+position reset to 0, which already advances the generation and hides lyrics. Songs show the panel
+~1.6 s later; ads did not. Treat "new item and no panel within ~3 s" as ad/unknown; confirm across
+more ads in Phase 2. If a case appears with no transition, record its detection delay. Neither missing text nor a failed match proves an ad. Foreground detection must distinguish
 active XITE from a merely retrievable XITE window.
 
 ### Lyrics selection
@@ -157,7 +171,8 @@ intervals without holding old lyrics indefinitely through a deliberate gap.
 | `LyricsAccessibilityService` | Reads panel (2 s poll + events), hosts overlay window | `collect()`/poll logic from probe `ProbeService.java` |
 | `OverlayView` | `TYPE_ACCESSIBILITY_OVERLAY`, not focusable/touchable; current line bold, next line dim; hidden when XITE isn't in front or there are no lyrics | — |
 | `PlaybackWatcher` | NotificationListenerService → `MediaSessionManager.getActiveSessions` → XITE controller state/position | — |
-| `ProjectionActivity` | Launched by `LyricsAccessibilityService`; requests fresh projection authorization when needed and starts `CaptureService` after consent; app-op silent startup is a device-specific experiment | — |
+| `ProjectionActivity` | Launched by `LyricsAccessibilityService` **only while a launcher is the top app** (never over XITE); requests fresh projection authorization and starts `CaptureService` after consent; silent via persisted `PROJECT_MEDIA` app-op | — |
+| `A11yRebinder` | Called by PlaybackWatcher: re-adds only our accessibility entry after a force-stop (needs `WRITE_SECURE_SETTINGS`) | — |
 | `CaptureService` | Foreground service (`mediaProjection` type), XITE-uid-only capture, 16 kHz mono PCM, 8 s clips with frame timestamps; revocation cleanup | — |
 | `SongRecFingerprint` | Java port of SongRec `algorithm.rs`, `hanning.rs`, `signature_format.rs` → `data:audio/vnd.shazam.sig;base64,…` | Audile `core/recognition/native/songrecfp/src/**` |
 | `ShazamClient` | POST to `amp.shazam.com/discovery/v5/.../tag/{uuid}/{uuid}`, parse `matches[].offset`, track title/subtitle; 429 → backoff | Audile `ShazamRecognitionService.kt`, `ShazamRequestJson.kt`, `ShazamResponseJson.kt` (port to `HttpURLConnection` + `org.json`) |
@@ -228,6 +243,11 @@ cannot meet that requirement.
    recognizer on timestamped captures. Save tool revisions, PCM preprocessing, responses and LRCLIB
    candidate ids. First prove offset semantics with known-start segments; then test 3–4 XITE songs
    at several points, including a known video edit and an ambiguous-version case. Observe an ad break.
+   Include songs with repeated choruses: decide how a conflicting match (e.g. Dracula's −100 s jump)
+   is told apart from a real edit — e.g. require a second agreeing clip, or prefer the candidate
+   offset consistent with the current delta when the match statistics are weaker.
+   Resolve the AudioRecord frame-origin question from Phase 1 (first sample dated ~70 ms before
+   `startRecording()` returned) with the known-start tests.
    **Gate:** establish first-sample clock mapping and lyric alignment against audible boundaries;
    calibrate `devicePipelineOffset`; log `timeskew`; measure stable accuracy, initial latency, edit
    recovery and ad detection. Also run the planned lookup cadence (~60–80/hour) for at least 30 min
@@ -256,7 +276,9 @@ cannot meet that requirement.
    readability alongside XITE's rare captions and uninterrupted remote control.
    **Gate:** pass the separate timing and behavioral criteria below; record failed criteria and
    explicitly revise the design/target before calling the work complete.
-7. **Install script + cleanup.** `install.sh`: build, install, all grants, enable the accessibility
+7. **Install script + cleanup.** `install.sh`: build, install, all grants (`RECORD_AUDIO`,
+   `WRITE_SECURE_SETTINGS`, notification listener, `PROJECT_MEDIA` followed by `appops write-settings`),
+   enable the accessibility
    service while preserving all existing services, including **AT4K**
    (`com.overdevs.at4k/com.overdevs.at4k.Hra`). Use full component names; toggle only this app's
    service if rebinding is needed. Document consent-based startup if silent startup is unsupported.
@@ -265,7 +287,10 @@ cannot meet that requirement.
 
 ## Risks
 
-- **Capture, silent startup and recovery** are distinct unproven device capabilities (phase 1).
+- **Capture, silent startup and recovery** — proven in Phase 1 on this TV/firmware; a firmware update
+  could change app-op or background-launch behavior. Re-run the Phase 1 gates after major updates.
+- **XITE's self-kill on pause** means any future UI (settings, consent) must never open over XITE.
+- **Repeated choruses** can produce confident-looking wrong offsets (Phase 1 Dracula clip #7).
 - **Unofficial Shazam access** can rate-limit (429) or stop working. Recognition sits behind one
   provider interface; any alternative needs separate SDK, pricing, offset-semantics and alignment
   validation before it can replace the implementation.

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Watches only XITE; reads its window text, never acts on it. -->
+<!-- Watches only XITE: reads the info panel, never acts on it. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:packageNames="com.xite.musicvideos"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewTextChanged|typeViewFocused"

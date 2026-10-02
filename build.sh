@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the probe APK with plain SDK tools (no Gradle).
+# Builds the XITE Lyrics APK with plain SDK tools (no Gradle).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -21,5 +21,5 @@ javac --release 17 -nowarn -cp "$JAR" -d out/classes \
 (cd out/dex && jar --update --no-manifest --file ../unsigned.apk classes.dex)
 "$BT/zipalign.exe" -f 4 out/unsigned.apk out/aligned.apk
 "$BT/apksigner.bat" sign --ks "$KS" --ks-pass pass:android \
-    --out out/xite-probe.apk out/aligned.apk
-echo "built out/xite-probe.apk"
+    --out out/xite-lyrics.apk out/aligned.apk
+echo "built out/xite-lyrics.apk"

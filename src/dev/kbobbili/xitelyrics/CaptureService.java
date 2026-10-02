@@ -1,0 +1,323 @@
+package dev.kbobbili.xitelyrics;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.ServiceInfo;
+import android.media.AudioFormat;
+import android.media.AudioPlaybackCaptureConfiguration;
+import android.media.AudioRecord;
+import android.media.AudioTimestamp;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.IBinder;
+import android.os.Looper;
+import android.os.SystemClock;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Arrays;
+import java.util.Locale;
+
+/**
+ * Holds the MediaProjection and records 8 s clips of XITE's audio only
+ * (uid-matched playback capture), 16 kHz mono PCM. Each clip is saved as a
+ * WAV plus a JSON sidecar with per-read AudioRecord timestamps and the
+ * playback/panel state before and after, so the timing can be analysed.
+ *
+ * Clips land in /sdcard/Android/data/dev.kbobbili.xitelyrics/files/clips/.
+ * Extra clip on demand:
+ *   am broadcast -a dev.kbobbili.xitelyrics.CAPTURE_NOW -p dev.kbobbili.xitelyrics
+ * Stop the projection (same path as a system revocation), for lifecycle tests:
+ *   am broadcast -a dev.kbobbili.xitelyrics.STOP_PROJECTION -p dev.kbobbili.xitelyrics
+ */
+public class CaptureService extends Service {
+    static final String ACTION_START = "dev.kbobbili.xitelyrics.START";
+    static final String ACTION_CAPTURE_NOW = "dev.kbobbili.xitelyrics.CAPTURE_NOW";
+    static final String ACTION_STOP_PROJECTION = "dev.kbobbili.xitelyrics.STOP_PROJECTION";
+    static final String EXTRA_CODE = "code";
+    static final String EXTRA_DATA = "data";
+    /** Also run as a microphone-type service; only if uid capture turns out silent without it. */
+    static final String EXTRA_MIC = "withMic";
+
+    private static final int RATE = 16000;
+    private static final int CLIP_MS = 8000;
+    private static final int READ_FRAMES = RATE / 10;
+    private static final long INTERVAL_MS = 30_000;
+    private static final int KEEP_CLIPS = 60;
+    private static final short SILENT_PEAK = 64;
+    private static final String CHANNEL = "capture";
+
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private MediaProjection projection;
+    private HandlerThread worker;
+    private Handler work;
+    private int xiteUid;
+    private int clipSeq;
+    private boolean receiverOn;
+
+    private final BroadcastReceiver captureNow = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            if (ACTION_STOP_PROJECTION.equals(i.getAction())) {
+                MediaProjection mp = projection;
+                Events.log("projection_stop_requested");
+                if (mp != null) mp.stop(); // fires onStop like a revocation
+            } else if (work != null) {
+                work.post(() -> captureClip("manual"));
+            }
+        }
+    };
+
+    private final MediaProjection.Callback projectionCallback = new MediaProjection.Callback() {
+        @Override
+        public void onStop() {
+            Events.log("projection_stopped");
+            shutdown();
+        }
+    };
+
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            long start = SystemClock.uptimeMillis();
+            State.Playback p = State.playback;
+            if (State.xiteForeground && p != null && p.playing()) captureClip("auto");
+            if (work != null) work.postAtTime(this, start + INTERVAL_MS);
+        }
+    };
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        Events.init(this);
+        if (intent == null) {
+            // Restarted by the system without a token; a projection can't be resumed.
+            Events.log("capture_restart_without_token");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (ACTION_CAPTURE_NOW.equals(intent.getAction())) {
+            if (work != null) work.post(() -> captureClip("manual"));
+            return START_NOT_STICKY;
+        }
+        if (!ACTION_START.equals(intent.getAction())) return START_NOT_STICKY;
+        if (projection != null) {
+            Events.log("capture_start_ignored", "why", "already_running");
+            return START_NOT_STICKY;
+        }
+
+        boolean mic = intent.getBooleanExtra(EXTRA_MIC, false);
+        int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                | (mic ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE : 0);
+        // Android 14: the mediaProjection-type service must be in the foreground
+        // before getMediaProjection() is called.
+        startForeground(1, notification(), type);
+
+        int code = intent.getIntExtra(EXTRA_CODE, 0);
+        Intent data = intent.getParcelableExtra(EXTRA_DATA, Intent.class);
+        try {
+            projection = getSystemService(MediaProjectionManager.class).getMediaProjection(code, data);
+            xiteUid = getPackageManager().getApplicationInfo(PlaybackWatcher.XITE, 0).uid;
+        } catch (Exception e) {
+            Events.log("capture_start_failed", "error", e.toString());
+            shutdown();
+            return START_NOT_STICKY;
+        }
+        if (projection == null) {
+            Events.log("capture_start_failed", "error", "null projection");
+            shutdown();
+            return START_NOT_STICKY;
+        }
+        projection.registerCallback(projectionCallback, main);
+        State.captureRunning = true;
+        IntentFilter filter = new IntentFilter(ACTION_CAPTURE_NOW);
+        filter.addAction(ACTION_STOP_PROJECTION);
+        registerReceiver(captureNow, filter, RECEIVER_EXPORTED);
+        receiverOn = true;
+        worker = new HandlerThread("capture");
+        worker.start();
+        work = new Handler(worker.getLooper());
+        work.postDelayed(tick, 3000);
+        Events.log("projection_started", "xiteUid", xiteUid, "withMic", mic);
+        return START_NOT_STICKY;
+    }
+
+    private void captureClip(String reason) {
+        MediaProjection mp = projection;
+        if (mp == null) return;
+        int seq = ++clipSeq;
+        JSONObject meta = new JSONObject();
+        JSONArray reads = new JSONArray();
+        short[] pcm = new short[RATE * CLIP_MS / 1000];
+        int got = 0;
+        AudioRecord rec = null;
+        try {
+            meta.put("seq", seq);
+            meta.put("reason", reason);
+            meta.put("rate", RATE);
+            meta.put("before", State.snapshot());
+            AudioPlaybackCaptureConfiguration cfg =
+                    new AudioPlaybackCaptureConfiguration.Builder(mp).addMatchingUid(xiteUid).build();
+            AudioFormat fmt = new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                    .build();
+            int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT);
+            rec = new AudioRecord.Builder()
+                    .setAudioFormat(fmt)
+                    .setBufferSizeInBytes(Math.max(min * 4, RATE * 2))
+                    .setAudioPlaybackCaptureConfig(cfg)
+                    .build();
+            meta.put("minBuffer", min);
+            meta.put("bufferFrames", rec.getBufferSizeInFrames());
+
+            AudioTimestamp ts = new AudioTimestamp();
+            meta.put("startCallNs", SystemClock.elapsedRealtimeNanos());
+            rec.startRecording();
+            meta.put("startedNs", SystemClock.elapsedRealtimeNanos());
+            meta.put("recordingState", rec.getRecordingState());
+            while (got < pcm.length) {
+                int n = rec.read(pcm, got, Math.min(READ_FRAMES, pcm.length - got));
+                long now = SystemClock.elapsedRealtimeNanos();
+                if (n < 0) {
+                    meta.put("readError", n);
+                    break;
+                }
+                got += n;
+                JSONObject r = new JSONObject();
+                r.put("frames", got);
+                r.put("nowNs", now);
+                int st = rec.getTimestamp(ts, AudioTimestamp.TIMEBASE_BOOTTIME);
+                if (st == AudioRecord.SUCCESS) {
+                    r.put("tsFrame", ts.framePosition);
+                    r.put("tsNs", ts.nanoTime);
+                } else {
+                    r.put("tsErr", st);
+                }
+                reads.put(r);
+            }
+            rec.stop();
+            meta.put("after", State.snapshot());
+        } catch (Exception e) {
+            Events.log("clip_failed", "seq", seq, "error", e.toString());
+            if (rec != null) rec.release();
+            return;
+        }
+        rec.release();
+
+        int peak = 0;
+        double sumSq = 0;
+        for (int i = 0; i < got; i++) {
+            int v = Math.abs((int) pcm[i]);
+            if (v > peak) peak = v;
+            sumSq += (double) pcm[i] * pcm[i];
+        }
+        double rms = got == 0 ? 0 : Math.sqrt(sumSq / got);
+        double rmsDb = rms <= 0 ? -120 : 20 * Math.log10(rms / 32768.0);
+        boolean silent = peak < SILENT_PEAK;
+
+        String base = String.format(Locale.US, "clip-%04d-%d", seq, System.currentTimeMillis());
+        File dir = new File(getExternalFilesDir(null), "clips");
+        try {
+            meta.put("frames", got);
+            meta.put("peak", peak);
+            meta.put("rmsDb", Math.round(rmsDb * 10) / 10.0);
+            meta.put("silent", silent);
+            meta.put("reads", reads);
+            dir.mkdirs();
+            writeWav(new File(dir, base + ".wav"), pcm, got);
+            try (FileOutputStream out = new FileOutputStream(new File(dir, base + ".json"))) {
+                out.write(meta.toString(1).getBytes("UTF-8"));
+            }
+            prune(dir);
+        } catch (IOException | JSONException e) {
+            Events.log("clip_save_failed", "seq", seq, "error", e.toString());
+        }
+        int genBefore = meta.optJSONObject("before") == null ? -1 : meta.optJSONObject("before").optInt("gen");
+        Events.log("clip", "seq", seq, "reason", reason, "file", base, "frames", got,
+                "peak", peak, "rmsDb", Math.round(rmsDb * 10) / 10.0, "silent", silent,
+                "genStart", genBefore, "genEnd", State.generation);
+    }
+
+    private static void writeWav(File f, short[] pcm, int frames) throws IOException {
+        int dataBytes = frames * 2;
+        ByteBuffer b = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN);
+        b.put("RIFF".getBytes("US-ASCII")).putInt(36 + dataBytes).put("WAVE".getBytes("US-ASCII"));
+        b.put("fmt ".getBytes("US-ASCII")).putInt(16).putShort((short) 1).putShort((short) 1)
+                .putInt(RATE).putInt(RATE * 2).putShort((short) 2).putShort((short) 16);
+        b.put("data".getBytes("US-ASCII")).putInt(dataBytes);
+        for (int i = 0; i < frames; i++) b.putShort(pcm[i]);
+        try (FileOutputStream out = new FileOutputStream(f)) {
+            out.write(b.array());
+        }
+    }
+
+    private static void prune(File dir) {
+        File[] wavs = dir.listFiles((d, n) -> n.endsWith(".wav"));
+        if (wavs == null || wavs.length <= KEEP_CLIPS) return;
+        Arrays.sort(wavs);
+        for (int i = 0; i < wavs.length - KEEP_CLIPS; i++) {
+            String n = wavs[i].getName();
+            wavs[i].delete();
+            new File(dir, n.replace(".wav", ".json")).delete();
+        }
+    }
+
+    private Notification notification() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Lyrics timing",
+                NotificationManager.IMPORTANCE_LOW));
+        return new Notification.Builder(this, CHANNEL)
+                .setSmallIcon(android.R.drawable.presence_audio_online)
+                .setContentTitle("XITE Lyrics")
+                .setContentText("Listening to XITE to time lyrics")
+                .setOngoing(true)
+                .build();
+    }
+
+    private void shutdown() {
+        State.captureRunning = false;
+        if (worker != null) worker.quitSafely();
+        worker = null;
+        work = null;
+        if (receiverOn) unregisterReceiver(captureNow);
+        receiverOn = false;
+        MediaProjection mp = projection;
+        projection = null;
+        if (mp != null) {
+            mp.unregisterCallback(projectionCallback);
+            mp.stop();
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
+    }
+
+    @Override
+    public void onDestroy() {
+        Events.log("capture_destroyed");
+        if (projection != null) shutdown();
+        State.captureRunning = false;
+        super.onDestroy();
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+}
