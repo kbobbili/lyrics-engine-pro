@@ -5,6 +5,7 @@ audio, identifies the song and its position with Shazam's fingerprint (a pure-Ja
 SongRec algorithm), fetches synced lyrics from LRCLIB, and draws the current line over the video.
 
 - Design and phases: [docs/PLAN.md](docs/PLAN.md)
+- What's next: [future-roadmap.md](future-roadmap.md) (translations, menu hiding, open decisions)
 - Evidence per phase: [Phase 1](docs/PHASE1-RESULTS.md) · [Phase 2](docs/PHASE2-RESULTS.md) ·
   [Phases 3–4](docs/PHASE3-4-RESULTS.md) · [Phases 5–6](docs/PHASE5-6-RESULTS.md)
 
