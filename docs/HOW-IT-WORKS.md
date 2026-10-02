@@ -31,7 +31,7 @@ modifying XITE. A laptop is only needed to build, install or debug it.
 | Lyrics client | `lyrics/LrcLibClient`, `Lrc` | Searches LRCLIB, picks the right upload (grouped by lyric timing; snippets and remix/live versions filtered; ambiguous cases left blank), retries outages, caches on the TV. |
 | Sync engine | `sync/SyncEngine` | The decision-maker: when to listen, which answers to trust, which line to show. Pure logic on an injected clock, so it's tested without a TV. |
 | Controller | `LyricsController` | Runs the engine on the main thread, records clips on the capture worker, fetches lyrics on their own thread, feeds the overlay. |
-| Overlay | `LyricsOverlay`, `OverlayStyle`, `TightTextView` | Draws the current line: Lexend, compact centred block (≤ 45 % of the width, balanced wrap), soft semi-transparent box hugging the text, at the bottom edge, 120 ms crossfade started early so lines are never late. |
+| Overlay | `LyricsOverlay`, `OverlayStyle`, `TightTextView` | Draws the current line: Lexend semi-bold, compact centred block (≤ 45 % of the width, balanced wrap) at the bottom edge, no background box — a heavy soft shadow keeps it readable — and a 120 ms crossfade started early so lines are never late. |
 | Self-repair | `A11yRebinder` | If Android force-stops the app, re-enables only its own accessibility entry ~10 s later (other services such as AT4K untouched). |
 
 ## One song, start to finish
@@ -109,8 +109,8 @@ adb -s <serial> logcat -s XiteLyrics # live decisions: sync_*, display, ...
 After every install: press Home on the TV and reopen XITE (capture restarts from the home screen).
 Wireless adb is `192.168.1.129:5555` after reboots.
 
-Switches (adb broadcasts to `dev.kbobbili.xitelyrics`): `OVERLAY` (on/off), `STYLE` (preset 0–5;
-default 5 = "Caption"), `OVERLAY_PREVIEW` (sample text). Debug: `RECORD`, `CAPTURE_NOW`,
+Switches (adb broadcasts to `dev.kbobbili.xitelyrics`): `OVERLAY` (on/off), `STYLE` (preset 0–6;
+default 6 = "Caption, no box"; 5 = the same with a box), `OVERLAY_PREVIEW` (sample text). Debug: `RECORD`, `CAPTURE_NOW`,
 `STOP_PROJECTION`, `MARKER`, `TRANSPORT`, `FP_SELFTEST`, `P4_SELFTEST`.
 
 ## Testing and tools

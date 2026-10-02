@@ -42,7 +42,6 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
         line = new TightTextView(ctx);
         line.setTextColor(Color.WHITE);
         line.setGravity(Gravity.CENTER);
-        line.setShadowLayer(4, 0, 2, Color.BLACK);
         line.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_BALANCED);   // even line lengths
         line.setIncludeFontPadding(false);   // Lexend's built-in top/bottom spacing made the box tall
         line.setBackground(bg);
@@ -58,6 +57,7 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
     }
 
     void apply(OverlayStyle s) {
+        line.setShadowLayer(s.shadowRadius, 0, 2, Color.BLACK);
         bottomDp = s.bottomDp;
         if (added) {
             WindowManager.LayoutParams lp = (WindowManager.LayoutParams) root.getLayoutParams();

@@ -20,16 +20,18 @@ final class OverlayStyle {
     final float maxWidthFraction;   // of screen width; wraps into a compact block when small
     final int maxLines;
     final int bottomDp;             // gap between the box and the bottom of the screen
+    final float shadowRadius;       // text shadow; stronger when there is no box behind the text
 
     private OverlayStyle(String name, String fontAsset, int weight, int textSp, int boxAlpha, int cornerDp,
             int padHdp, int padVdp, float letterSpacing) {
-        this(name, fontAsset, weight, textSp, boxAlpha, cornerDp, padHdp, padVdp, letterSpacing, false, 0.85f, 2, 56);
+        this(name, fontAsset, weight, textSp, boxAlpha, cornerDp, padHdp, padVdp, letterSpacing, false, 0.85f, 2, 56, 4f);
     }
 
     private OverlayStyle(String name, String fontAsset, int weight, int textSp, int boxAlpha, int cornerDp,
             int padHdp, int padVdp, float letterSpacing, boolean allCaps, float maxWidthFraction, int maxLines,
-            int bottomDp) {
+            int bottomDp, float shadowRadius) {
         this.bottomDp = bottomDp;
+        this.shadowRadius = shadowRadius;
         this.allCaps = allCaps;
         this.maxWidthFraction = maxWidthFraction;
         this.maxLines = maxLines;
@@ -53,7 +55,10 @@ final class OverlayStyle {
             // Compact centred block of up to 4 lines (max 45% of the width) at the very bottom,
             // where XITE's own captions (now switched off in XITE) sat; style 5's font and box.
             new OverlayStyle("6 Caption", "fonts/Lexend-Variable.ttf", 500, 30, 140, 12, 14, 6, 0f,
-                    false, 0.45f, 4, 2),
+                    false, 0.45f, 4, 2, 4f),
+            // Style 6 without the box: text only, with a heavier shadow so it stays readable.
+            new OverlayStyle("7 Caption, no box", "fonts/Lexend-Variable.ttf", 600, 30, 0, 12, 14, 6, 0f,
+                    false, 0.45f, 4, 2, 10f),
     };
 
     static OverlayStyle get(int index) {

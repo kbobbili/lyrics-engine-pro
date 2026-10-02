@@ -74,8 +74,8 @@ public class LyricsAccessibilityService extends AccessibilityService {
      *   am broadcast -a dev.kbobbili.xitelyrics.STYLE --ei style 2 -p dev.kbobbili.xitelyrics
      */
     static final String ACTION_STYLE = "dev.kbobbili.xitelyrics.STYLE";
-    /** "6 Caption" (Lexend, compact centred block at the bottom), requested by the owner 2026-10-02. */
-    private static final int DEFAULT_STYLE = 5;
+    /** "7 Caption, no box" (Lexend, compact centred block at the bottom, shadow only), owner's pick 2026-10-02. */
+    private static final int DEFAULT_STYLE = 6;
     private static final String PREFS = "overlay";
     private LyricsOverlay overlay;
 
