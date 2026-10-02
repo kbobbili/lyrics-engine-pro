@@ -76,16 +76,18 @@ Pressing D-pad on the remote opens XITE's menu (Find / Create / Explore); the ly
 buttons. The accessibility service already reads XITE's screen, so it can detect the menu and hide the
 overlay while it's up. Small change; proposed, not yet approved.
 
-## 3. Re-check rhythm within songs
+## 3. Re-check rhythm within songs — done 2026-10-02
 
-Today: first 5 s clip as soon as the info panel appears, then an 8 s clip every 45 s (~5 per song);
-15 s re-check after a confirmed video edit; 3 s polling after the music stops. Unannounced edits can
-still show up to ~30 s of wrong lines between checks. Checking every 30 s would roughly cap that at
-~30 s for ~50 % more Shazam calls (zero rate limits seen so far). **Decision: keep 45 s unless wrong
-lines become annoying.**
+Now: first 5 s clip as soon as the info panel appears, then an 8 s clip **every 30 s** (~8 per song);
+on a timing jump the new timing is shown **at once** and confirmed by the next clip (reverted if the
+old timing is confirmed); 15 s re-check after a confirmed edit; 3 s polling after the music stops.
+Phase-averaged on the recorded evening (`tools/phase5/cadence_sim.py`): wrong-lyric time after edits
+104 s → 79 s, and no blank gaps while confirming. Watch the event log for `sync_rate_limited`; if
+Shazam starts limiting, `SyncEngine.CLIP_PERIOD` is the knob.
 
 ## 4. Decided against (for now)
 
+- **Extra early check ~25 s into each song.** Redundant once checks are every 30 s.
 - **On-TV scene detector** (spot acted scenes the moment music stops). Only 1 of 51 songs had real
   scenes; "hide when the music stops" already handles them reasonably. Riskiest change for the smallest
   gain.
