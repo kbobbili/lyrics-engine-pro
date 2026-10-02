@@ -62,7 +62,6 @@ public class CaptureService extends Service {
     private static final int RATE = 16000;
     private static final int CLIP_MS = 8000;
     private static final int READ_FRAMES = RATE / 10;
-    private static final long INTERVAL_MS = 30_000;
     private static final int KEEP_CLIPS = 60;
     private static final short SILENT_PEAK = 64;
     private static final int CHUNK_FRAMES = RATE * 60;
@@ -80,6 +79,87 @@ public class CaptureService extends Service {
     private boolean receiverOn;
     private volatile boolean recording;
     private Thread recThread;
+    private static volatile CaptureService current;
+
+    /** One engine clip: PCM plus the elapsed-realtime (ms) of its first and past-last sample. */
+    public static final class Clip {
+        public final short[] pcm;
+        public final long firstSampleRt;
+        public final long endRt;
+
+        Clip(short[] pcm, long firstSampleRt, long endRt) {
+            this.pcm = pcm;
+            this.firstSampleRt = firstSampleRt;
+            this.endRt = endRt;
+        }
+    }
+
+    public interface ClipCallback {
+        /** Called on the capture worker; clip is null if recording failed. */
+        void onClip(Clip clip);
+    }
+
+    /** The service holding a live projection, or null. */
+    static CaptureService running() {
+        CaptureService c = current;
+        return c != null && c.projection != null ? c : null;
+    }
+
+    /**
+     * Records one clip on the worker and hands it to cb (also on the worker, so
+     * recognition can run there too and clips never overlap).
+     */
+    void recordClip(int ms, ClipCallback cb) {
+        Handler w = work;
+        if (w == null) {
+            cb.onClip(null);
+            return;
+        }
+        w.post(() -> cb.onClip(recordClipNow(ms)));
+    }
+
+    private Clip recordClipNow(int ms) {
+        MediaProjection mp = projection;
+        if (mp == null) return null;
+        short[] pcm = new short[RATE * ms / 1000];
+        AudioRecord rec = null;
+        try {
+            rec = newRecorder(mp);
+            AudioTimestamp ts = new AudioTimestamp();
+            double[] t0 = new double[pcm.length / READ_FRAMES + 2];
+            int nTs = 0;
+            int got = 0;
+            rec.startRecording();
+            while (got < pcm.length) {
+                int n = rec.read(pcm, got, Math.min(READ_FRAMES, pcm.length - got));
+                if (n < 0) {
+                    Events.log("clip_read_error", "code", n);
+                    return null;
+                }
+                got += n;
+                if (rec.getTimestamp(ts, AudioTimestamp.TIMEBASE_BOOTTIME) == AudioRecord.SUCCESS && nTs < t0.length) {
+                    // rt of stream frame 0, assuming frame 0 = timestamp frame 0 (Phase 1/2)
+                    t0[nTs++] = ts.nanoTime / 1e6 - ts.framePosition * 1000.0 / RATE;
+                }
+            }
+            if (nTs == 0) return null;
+            double[] sorted = Arrays.copyOf(t0, nTs);
+            Arrays.sort(sorted);
+            long first = Math.round(sorted[nTs / 2]);
+            return new Clip(pcm, first, first + ms);
+        } catch (Exception e) {
+            Events.log("clip_failed", "error", e.toString());
+            return null;
+        } finally {
+            if (rec != null) {
+                try {
+                    rec.stop();
+                } catch (IllegalStateException ignored) {
+                }
+                rec.release();
+            }
+        }
+    }
 
     private final BroadcastReceiver captureNow = new BroadcastReceiver() {
         @Override
@@ -104,16 +184,6 @@ public class CaptureService extends Service {
         public void onStop() {
             Events.log("projection_stopped");
             shutdown();
-        }
-    };
-
-    private final Runnable tick = new Runnable() {
-        @Override
-        public void run() {
-            long start = SystemClock.uptimeMillis();
-            State.Playback p = State.playback;
-            if (!recording && State.xiteForeground && p != null && p.playing()) captureClip("auto");
-            if (work != null) work.postAtTime(this, start + INTERVAL_MS);
         }
     };
 
@@ -168,7 +238,7 @@ public class CaptureService extends Service {
         worker = new HandlerThread("capture");
         worker.start();
         work = new Handler(worker.getLooper());
-        work.postDelayed(tick, 3000);
+        current = this;
         Events.log("projection_started", "xiteUid", xiteUid, "withMic", mic);
         if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_CONTINUOUS, false)) startRecording();
         return START_NOT_STICKY;
@@ -449,6 +519,7 @@ public class CaptureService extends Service {
 
     private void shutdown() {
         State.captureRunning = false;
+        if (current == this) current = null;
         stopRecording();
         if (worker != null) worker.quitSafely();
         worker = null;

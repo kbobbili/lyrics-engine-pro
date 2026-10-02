@@ -117,6 +117,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
         if (xiteFront != State.xiteForeground) {
             State.xiteForeground = xiteFront;
             Events.log("xite_foreground", "value", xiteFront, "topApp", top);
+            LyricsController.get(this).onForeground(xiteFront);
         }
         if (panel.title != null || panel.artist != null) {
             if (!Objects.equals(panel.title, State.panelTitle) || !Objects.equals(panel.artist, State.panelArtist)) {
@@ -124,6 +125,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
             }
             State.panelTitle = panel.title;
             State.panelArtist = panel.artist;
+            LyricsController.get(this).onPanel(panel.title, panel.artist);
             State.panelSeenRt = SystemClock.elapsedRealtime();
         }
         if (panel.progress != null && !panel.progress.equals(State.panelProgress)) {

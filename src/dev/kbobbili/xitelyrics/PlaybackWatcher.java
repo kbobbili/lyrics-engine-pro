@@ -78,6 +78,7 @@ public class PlaybackWatcher extends NotificationListenerService {
         @Override
         public void onSessionDestroyed() {
             Events.log("session_destroyed");
+            LyricsController.get(PlaybackWatcher.this).onSession(false);
             detach();
             State.playback = null;
             State.bumpGeneration("session_destroyed");
@@ -122,6 +123,7 @@ public class PlaybackWatcher extends NotificationListenerService {
         detach();
         if (xite == null) {
             Events.log("session_gone");
+            LyricsController.get(this).onSession(false);
             State.playback = null;
             State.bumpGeneration("session_gone");
             return;
@@ -130,6 +132,7 @@ public class PlaybackWatcher extends NotificationListenerService {
         token = t;
         controller.registerCallback(callback, handler);
         Events.log("session_attached", "tag", controller.getTag());
+        LyricsController.get(this).onSession(true);
         State.bumpGeneration("session_attached");
         PlaybackState s = controller.getPlaybackState();
         if (s != null) onState(s);
@@ -145,6 +148,7 @@ public class PlaybackWatcher extends NotificationListenerService {
         State.Playback prev = State.playback;
         State.Playback now = new State.Playback(s);
         State.playback = now;
+        LyricsController.get(this).onPlayback(now.state, now.position, now.updateRt, now.speed);
         long rt = SystemClock.elapsedRealtime();
         String reason = null;
         if (prev == null) {
