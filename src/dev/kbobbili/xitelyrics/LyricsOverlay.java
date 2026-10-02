@@ -80,7 +80,7 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
     }
 
     /** Share of the font's natural gap between wrapped lines that is kept (owner choice, 2026-10-02). */
-    private static final float LINE_GAP_KEEP = 0.45f;
+    private static final float LINE_GAP_KEEP = 0.55f;
 
     /**
      * The visible gap between two wrapped lines runs from one line's baseline to the top of
