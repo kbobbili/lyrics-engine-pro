@@ -1,49 +1,63 @@
 # XITE Lyrics
 
-Companion app for the Onn 4K Google TV Pro that will show synced lyrics over the XITE music-video
-app. See [docs/PLAN.md](docs/PLAN.md) for the design and phases, and
-[docs/PHASE1-RESULTS.md](docs/PHASE1-RESULTS.md) for what's been proven on the device.
+Synced lyrics over the XITE music-video app on the Onn 4K Google TV Pro. The app listens to XITE's
+audio, identifies the song and its position with Shazam's fingerprint (a pure-Java port of the
+SongRec algorithm), fetches synced lyrics from LRCLIB, and draws the current line over the video.
 
-**Current state (Phase 1 spike):** reads XITE's info panel and media session, holds a MediaProjection,
-and records 8 s clips of XITE's audio every 30 s while XITE plays, with timestamps for offline
-analysis. No lyrics or overlay yet.
+- Design and phases: [docs/PLAN.md](docs/PLAN.md)
+- Evidence per phase: [Phase 1](docs/PHASE1-RESULTS.md) · [Phase 2](docs/PHASE2-RESULTS.md) ·
+  [Phases 3–4](docs/PHASE3-4-RESULTS.md) · [Phases 5–6](docs/PHASE5-6-RESULTS.md)
 
-## Build
+**State:** recognition, lyrics and sync work end to end (verified on a recorded evening and with
+on-TV fixture checks). The overlay is built but **off by default** pending a live watch session.
 
-Plain SDK tools, no Gradle. Needs `ANDROID_HOME` (build-tools 36.0.0, platform android-37.0) and a JDK.
+## How it works
 
-```bash
-bash build.sh            # -> out/xite-lyrics.apk
+```text
+XITE audio ──(playback capture, 8 s clips)──► Java fingerprint ──► Shazam ──► song + offset
+XITE media session ──► video position (with XITE's late corrections rebased)       │
+XITE info panel ──► title/artist (lyrics prefetch, ad detection)                    ▼
+LRCLIB ──► synced lyrics ──► SyncEngine: line at videoPos + delta ──► overlay (2 lines)
 ```
 
-## Install and set up (adb)
+XITE kills itself if any activity opens over it, so screen-capture consent is obtained only from
+the home screen (silently, via an app-op) and then kept alive.
+
+## Install
+
+Plain SDK tools, no Gradle: needs `ANDROID_HOME` (build-tools 36.0.0, platform android-37.0) and a JDK.
 
 ```bash
-D="-s <tv-ip>:<port>"; P=dev.kbobbili.xitelyrics
-adb $D install -r out/xite-lyrics.apk
-adb $D shell pm grant $P android.permission.RECORD_AUDIO
-adb $D shell pm grant $P android.permission.WRITE_SECURE_SETTINGS
-adb $D shell cmd notification allow_listener $P/$P.PlaybackWatcher
-# Silent projection consent; write-settings makes it survive a reboot.
-adb $D shell "appops set $P PROJECT_MEDIA allow && appops write-settings"
-# Append (don't replace) the accessibility service, keeping AT4K etc.
-CUR=$(adb $D shell settings get secure enabled_accessibility_services | tr -d '\r')
-adb $D shell settings put secure enabled_accessibility_services "$CUR:$P/$P.LyricsAccessibilityService"
+./install.sh <adb-serial>                 # build, install, all grants; keeps AT4K etc.
+./install.sh <adb-serial> --overlay on    # same, and switch the lyrics overlay on
 ```
 
-The projection is only requested from the home screen (XITE kills itself if anything opens over it),
-so after setup go to the home screen once, then open XITE.
+Then visit the home screen once (capture starts there) and open XITE.
 
-## Debug
+## Everyday commands
 
 ```bash
-adb $D logcat -s XiteLyrics                       # live events
-bash tools/pull-clips.sh <serial>                 # clips + events.jsonl -> clips/
-python tools/clip_stats.py clips/                 # level, silence, timestamp quality
-python tools/events.py clips/events.jsonl         # readable timeline
-adb $D shell am broadcast -a $P.CAPTURE_NOW -p $P      # extra clip now
-adb $D shell am broadcast -a $P.STOP_PROJECTION -p $P  # simulate revocation
+S=<adb-serial>; P=dev.kbobbili.xitelyrics
+adb -s $S logcat -s XiteLyrics                                            # live decisions (sync_*, display)
+adb -s $S shell am broadcast -a $P.OVERLAY --ez on true -p $P             # overlay on (false = off)
+adb -s $S shell am broadcast -a $P.OVERLAY_PREVIEW -p $P                  # 5 s sample text
 ```
 
-Clips stay on the TV in `/sdcard/Android/data/dev.kbobbili.xitelyrics/files/clips/` (last 60 kept).
-Delete pulled WAVs when done with them.
+## Tests and tools
+
+| Command | What it checks |
+|---|---|
+| `tools/phase3/check.sh` | fingerprint byte-for-byte vs the pinned reference (16 fixtures) |
+| `tools/phase4/test.sh` | Shazam/LRCLIB parsing, failure paths, Java-vs-Python lyric selection |
+| `tools/phase5/test.sh` | 38 SyncEngine scenarios |
+| `tools/phase5/replay.sh analysis/sessions/<id>` | whole engine on a recorded TV session |
+| `tools/phase2/*` | recording pull, recognition schedule/dense/semantics, Whisper lyric check |
+
+Debug hooks (broadcasts): `RECORD` (continuous recording), `CAPTURE_NOW`, `STOP_PROJECTION`,
+`MARKER` / `TRANSPORT` (calibration), `FP_SELFTEST`, `P4_SELFTEST`. Recordings stay on the TV under
+`/sdcard/Android/data/dev.kbobbili.xitelyrics/files/`; delete pulled audio when done.
+
+## Credits and licences
+
+Fingerprint algorithm: SongRec (marin-m, GPL-3.0) via shazamio-core (dotX12, MIT); FFT order
+mirrors chfft (MPL-2.0). Shazam access is unofficial; lyrics from LRCLIB. Personal use.

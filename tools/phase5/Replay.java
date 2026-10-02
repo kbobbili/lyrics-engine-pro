@@ -124,7 +124,7 @@ public class Replay {
             }
         }
         networkCalls++;
-        Thread.sleep(3_000);                       // stay polite to the unofficial API
+        Thread.sleep(6_000);                       // stay near the rate tested in Phase 2
         ShazamClient.Result r = shazam.recognize(clip);
         if (r.status == ShazamClient.Status.MATCH || r.status == ShazamClient.Status.NO_MATCH) {
             // cache in the Phase 2 format (response only) so later replays are offline

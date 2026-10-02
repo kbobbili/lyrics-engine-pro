@@ -6,8 +6,15 @@ XITE (music-video app on the Onn 4K Google TV Pro, Android 14 / API 34) has no l
 for most songs. XITE itself can't be modified, so the goal is a companion app on the TV that
 detects the current song, fetches synced lyrics, and draws 1–2 subtitle-style lines over the video.
 
-**Status (2026-10-02): Phases 0 and 1 complete — all three Phase 1 gates passed on the device.
-Next: Phase 2 (end-to-end alignment spike). Results and evidence: `docs/PHASE1-RESULTS.md` in the repo.**
+**Status (2026-10-02 morning):** Phases 0–4 passed; Phase 5 passed offline (38 deterministic
+checks + an end-to-end replay of a recorded 70-minute evening); Phase 6 overlay built, **off by
+default**; awaiting the owner for the on-TV live check, Phase 6 acceptance and Phase 7 cleanup.
+Evidence: `docs/PHASE1-RESULTS.md`, `PHASE2-RESULTS.md`, `PHASE3-4-RESULTS.md`, `PHASE5-6-RESULTS.md`.
+
+**Overnight changes to this plan's assumptions:** LRCLIB uploads grouped by lyric timing, not
+duration; primary-artist search + free-text fallback; delta rebased on XITE's late position
+correction; video edits are common (5/18 songs) and repeated-chorus false matches were not observed;
+shazamio's 10 s centring means clips stay ≤ 10 s.
 
 **Phase 1 findings that constrain the design:**
 - **XITE kills its own process ~0.7 s after any activity pauses it.** Nothing may ever open over
@@ -76,6 +83,11 @@ Only after proving the recognition offset refers to the first submitted sample, 
 `delta = referenceOffsetAtFirstSample - videoPos(firstSampleTime) - devicePipelineOffset`
 
 `referencePos(t) = videoPos(t) + delta`
+
+**Decision (2026-10-02): phone-video calibration deferred.** `devicePipelineOffset` ships as a
+tunable defaulting to 0. If the finished overlay looks consistently early/late, add a remote-adjustable
+nudge or run the phone-video procedure below then (tooling exists: `tools/phase2/calibrate_run.sh`,
+`run_calibrate.sh`). Phase 2 accuracy is measured on the captured-audio timeline only.
 
 `devicePipelineOffset` is one **measured** device constant: captured audio is tapped before the
 HDMI/output path, so it runs ahead of what is heard by a fixed amount. Calibrate it in Phase 2

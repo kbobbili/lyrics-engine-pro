@@ -2,7 +2,7 @@
 # Replays a recorded TV session through the real SyncEngine. Usage: tools/phase5/replay.sh analysis/sessions/<id>
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-JSON=out/lib/json-20240303.jar
+JSON=$(bash tools/json-jar.sh)
 rm -rf out/replay && mkdir -p out/replay
 javac --release 17 -nowarn -cp "$JSON" -d out/replay \
     src/dev/kbobbili/xitelyrics/fingerprint/*.java \
