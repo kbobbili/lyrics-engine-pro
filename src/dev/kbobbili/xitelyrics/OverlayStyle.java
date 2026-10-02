@@ -50,10 +50,10 @@ final class OverlayStyle {
             new OverlayStyle("3 Soft", "fonts/Nunito-Variable.ttf", 800, 32, 110, 22, 28, 12, 0f),
             new OverlayStyle("4 Crisp", "fonts/Montserrat-Variable.ttf", 700, 28, 170, 6, 26, 12, 0.02f),
             new OverlayStyle("5 Clean", "fonts/Lexend-Variable.ttf", 500, 31, 140, 16, 28, 12, 0f),
-            // Like XITE's own captions (now switched off in XITE): ALL CAPS in a compact block of
-            // up to 4 lines, where XITE's captions sat, with style 5's softer box.
-            new OverlayStyle("6 Caption", "fonts/Lexend-Variable.ttf", 600, 28, 140, 16, 22, 10, 0.02f,
-                    true, 0.45f, 4, 20),
+            // Compact centred block of up to 4 lines (max 45% of the width) at the very bottom,
+            // where XITE's own captions (now switched off in XITE) sat; style 5's font and box.
+            new OverlayStyle("6 Caption", "fonts/Lexend-Variable.ttf", 500, 30, 140, 16, 22, 10, 0f,
+                    false, 0.45f, 4, 6),
     };
 
     static OverlayStyle get(int index) {
