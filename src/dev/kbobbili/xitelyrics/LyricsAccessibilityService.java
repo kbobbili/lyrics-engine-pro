@@ -276,6 +276,8 @@ public class LyricsAccessibilityService extends AccessibilityService {
     private static final String OPEN_PANEL_ID = "openMenuButton";
     private static final String PANEL_ID = "channelDetailsRoot";
     private static final String UNSAVED = "Save Video", SAVED = "Video Saved";
+    /** Keep the panel up this long after a save, so XITE's own "Saved to Library" pop-up is readable. */
+    private static final long SAVED_POPUP_MS = 2_500;
     private static final long STEP_MS = 50, PANEL_WAIT_MS = 2_000, FOCUS_WAIT_MS = 1_500, CONFIRM_MAX_MS = 3_000;
 
     /** Polls check every STEP_MS until it returns true or timeoutMs passes, then calls done(ok). */
@@ -347,8 +349,13 @@ public class LyricsAccessibilityService extends AccessibilityService {
                 return n != null && SAVED.contentEquals(String.valueOf(n.getContentDescription()));
             }, CONFIRM_MAX_MS, saved -> {
                 Events.log("star_timing", "toPressMs", pressedAt - t0, "toConfirmMs", SystemClock.uptimeMillis() - t0);
-                finishStar(t0, weOpenedPanel, saved ? "saved" : "unconfirmed",
-                        saved ? "Saved to library" : "Couldn't save");
+                if (saved) {
+                    // XITE confirms with its own pop-up; no note of ours. Closing the panel
+                    // takes the pop-up with it, so wait before pressing Back.
+                    handler.postDelayed(() -> finishStar(t0, weOpenedPanel, "saved", null), SAVED_POPUP_MS);
+                } else {
+                    finishStar(t0, weOpenedPanel, "unconfirmed", "Couldn't save");
+                }
             });
         });
     }
@@ -358,7 +365,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
         boolean closed = false;
         if (weOpenedPanel && findXiteNode(PANEL_ID) != null) closed = performGlobalAction(GLOBAL_ACTION_BACK);
         Events.log("star_save", "result", result, "panelClosed", closed, "totalMs", SystemClock.uptimeMillis() - t0);
-        LyricsController.get(this).notice(note);
+        if (note != null) LyricsController.get(this).notice(note);
     }
 
     /**
