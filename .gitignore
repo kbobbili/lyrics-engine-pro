@@ -3,3 +3,4 @@ clips/
 *.wav
 analysis/
 tools/lib/
+tools/out/

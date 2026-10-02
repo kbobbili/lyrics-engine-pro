@@ -165,13 +165,14 @@ public class Replay {
         SyncEngine[] eng = new SyncEngine[1];
 
         SyncEngine.Actions actions = new SyncEngine.Actions() {
-            public void requestCapture(int gen, int epoch) {
+            public void requestCapture(int gen, int epoch, int clipMs) {
                 long first = now[0];
                 calls.computeIfAbsent(gen, g -> new int[1])[0]++;
                 long f0 = rtToFrame(first);
-                if (f0 < 0 || f0 + 8L * RATE > pcm.length) return;
-                short[] clip = Arrays.copyOfRange(pcm, (int) f0, (int) f0 + 8 * RATE);
-                long clipEnd = first + 8_000;
+                int n = clipMs * RATE / 1000;
+                if (f0 < 0 || f0 + n > pcm.length) return;
+                short[] clip = Arrays.copyOfRange(pcm, (int) f0, (int) f0 + n);
+                long clipEnd = first + clipMs;
                 try {
                     ShazamClient.Result r = recognize(clip);
                     queue.add(new Pending(clipEnd + r.latencyMs,

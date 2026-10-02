@@ -9,6 +9,7 @@ import sys
 
 
 def main(src: str) -> None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # titles in any script
     lines = sys.stdin if src == "-" else open(src, encoding="utf-8")
     for line in lines:
         start = line.find("{")

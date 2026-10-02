@@ -25,7 +25,7 @@ public class EngineTests {
         final List<String> lyricRequests = new ArrayList<>();
         final List<String> log = new ArrayList<>();
 
-        public void requestCapture(int gen, int epoch) { captures.add(new int[] {gen, epoch}); }
+        public void requestCapture(int gen, int epoch, int clipMs) { captures.add(new int[] {gen, epoch, clipMs}); }
 
         public void requestLyrics(int gen, String title, String artist) { lyricRequests.add(gen + ":" + title); }
 
@@ -80,23 +80,23 @@ public class EngineTests {
         for (long t = from; t <= to; t += 100) e.tick(t);
     }
 
-    /** Drive to the first capture, answer it with a match at video offset +500 ms, load lyrics. */
+    /** Drive to the first (fast) capture, answer it with a match at video offset +500 ms, load lyrics. */
     static SyncEngine aligned(Fake f) throws Exception {
         SyncEngine e = songStarted(f);
-        runTo(e, T0, T0 + 12_000);
+        runTo(e, T0, T0 + 2_000);
         int[] cap = f.captures.get(0);
-        e.onRecognition(cap[0], cap[1], T0 + 12_000, T0 + 20_000, match("Song", 12.5), T0 + 20_300);
-        e.onLyrics(cap[0], "Song", "Artist", lyrics(), T0 + 20_500);
+        e.onRecognition(cap[0], cap[1], T0 + 2_000, T0 + 7_000, match("Song", 2.5), T0 + 7_300);
+        e.onLyrics(cap[0], "Song", "Artist", lyrics(), T0 + 7_500);
         return e;
     }
 
     public static void main(String[] args) throws Exception {
         Fake f = new Fake();
         SyncEngine e = songStarted(f);
-        runTo(e, T0, T0 + 11_900);
-        check(f.captures.isEmpty(), "no capture before +12 s");
-        e.tick(T0 + 12_000);
-        check(f.captures.size() == 1, "first capture at +12 s");
+        runTo(e, T0, T0 + 1_900);
+        check(f.captures.isEmpty(), "no capture before +2 s");
+        e.tick(T0 + 2_000);
+        check(f.captures.size() == 1 && f.captures.get(0)[2] == 5_000, "fast first capture at +2 s, 5 s long");
         check(f.lyricRequests.size() == 1 && f.lyricRequests.get(0).endsWith("Song"), "lyrics prefetched from the panel");
 
         f = new Fake();
@@ -105,10 +105,10 @@ public class EngineTests {
         check(f.lyricRequests.size() == 1, "Shazam title = panel title: no second lyrics fetch");
         SyncEngine.Display d = e.display(T0 + 21_000);   // ref 21.5 s -> L5 (20-24 s)
         check(d.visible && "L5".equals(d.line) && "L6".equals(d.next), "shows current + next line: " + d.line + "/" + d.next);
-        runTo(e, T0 + 20_500, T0 + 56_900);
+        runTo(e, T0 + 7_500, T0 + 46_900);
         check(f.captures.size() == 1, "no capture before 45 s after the first clip");
-        e.tick(T0 + 57_000);
-        check(f.captures.size() == 2, "periodic capture 45 s after the first clip");
+        e.tick(T0 + 47_000);
+        check(f.captures.size() == 2 && f.captures.get(1)[2] == 8_000, "periodic capture 45 s after the first clip, 8 s long");
 
         // Stale result from an old generation is ignored.
         int[] old = f.captures.get(1);
@@ -121,7 +121,7 @@ public class EngineTests {
         // Pause freezes the line, drops in-flight clips; resume re-measures in 3 s.
         f = new Fake();
         e = aligned(f);
-        runTo(e, T0 + 20_500, T0 + 57_000);            // second capture in flight
+        runTo(e, T0 + 7_500, T0 + 47_000);            // second capture in flight
         int[] inflight = f.captures.get(1);
         long pauseAt = T0 + 58_000;                     // video 58 s, ref 58.5 -> L14 (56-60)
         e.onPlayback(PAUSED, 58_000, pauseAt, 0f, pauseAt);
@@ -164,7 +164,7 @@ public class EngineTests {
         // Miss keeps lyrics; retry after 15 s.
         f = new Fake();
         e = aligned(f);
-        runTo(e, T0 + 20_500, T0 + 57_000);
+        runTo(e, T0 + 7_500, T0 + 47_000);
         int[] c2 = f.captures.get(1);
         e.onRecognition(c2[0], c2[1], T0 + 57_000, T0 + 65_000, fail(ShazamClient.Status.NO_MATCH, 0), T0 + 65_300);
         check(e.display(T0 + 66_000).visible, "a missed lookup keeps the lyrics");
@@ -177,13 +177,13 @@ public class EngineTests {
         // Freshness cap: no accepted clip for > 120 s hides.
         f = new Fake();
         e = aligned(f);
-        e.tick(T0 + 20_000 + 120_001);
-        check(!e.display(T0 + 140_100).visible && f.logged("sync_expired"), "alignment expires 120 s after the last accepted clip");
+        e.tick(T0 + 7_000 + 120_001);
+        check(!e.display(T0 + 127_100).visible && f.logged("sync_expired"), "alignment expires 120 s after the last accepted clip");
 
         // Rate limit: wait max(Retry-After, 60 s).
         f = new Fake();
         e = aligned(f);
-        runTo(e, T0 + 20_500, T0 + 57_000);
+        runTo(e, T0 + 7_500, T0 + 47_000);
         c2 = f.captures.get(1);
         e.onRecognition(c2[0], c2[1], T0 + 57_000, T0 + 65_000, fail(ShazamClient.Status.RATE_LIMITED, 90), T0 + 65_000);
         before = f.captures.size();
@@ -195,7 +195,7 @@ public class EngineTests {
         // Conflict (repeated chorus): hide, confirm in 5 s; old alignment confirmed -> restored.
         f = new Fake();
         e = aligned(f);
-        runTo(e, T0 + 20_500, T0 + 57_000);
+        runTo(e, T0 + 7_500, T0 + 47_000);
         c2 = f.captures.get(1);
         e.onRecognition(c2[0], c2[1], T0 + 57_000, T0 + 65_000, match("Song", 67.5), T0 + 65_300); // +10 s
         check(e.mode() == SyncEngine.Mode.CONFIRMING && !e.display(T0 + 65_500).visible, "conflicting match hides and confirms");
@@ -207,13 +207,16 @@ public class EngineTests {
         // Conflict confirmed twice -> realign (real edit).
         f = new Fake();
         e = aligned(f);
-        runTo(e, T0 + 20_500, T0 + 57_000);
+        runTo(e, T0 + 7_500, T0 + 47_000);
         c2 = f.captures.get(1);
         e.onRecognition(c2[0], c2[1], T0 + 57_000, T0 + 65_000, match("Song", 54.5), T0 + 65_300);   // -2.5 s edit
         runTo(e, T0 + 65_300, T0 + 70_300);
         c3 = f.captures.get(f.captures.size() - 1);
         e.onRecognition(c3[0], c3[1], T0 + 70_300, T0 + 78_300, match("Song", 67.8), T0 + 78_600);
         check(e.mode() == SyncEngine.Mode.ALIGNED && Math.abs(e.deltaMs() + 2_500) < 1, "edit confirmed by 2 clips -> realigned to -2500 ms");
+        before = f.captures.size();
+        runTo(e, T0 + 78_600, T0 + 93_600);
+        check(f.captures.size() == before + 1, "re-check 15 s after a confirmed edit (edits cluster)");
 
         // Ad: no panel by +3 s -> AD, no Shazam calls.
         f = new Fake();
@@ -222,7 +225,9 @@ public class EngineTests {
         e.onForeground(true, T0 - 5_000);
         e.onPlayback(BUFFERING, 0, T0 - 500, 0f, T0 - 500);
         e.onPlayback(PLAYING, 0, T0, 1f, T0);
-        runTo(e, T0, T0 + 30_000);
+        runTo(e, T0, T0 + 2_900);
+        check(f.captures.isEmpty(), "no capture at +2 s while the panel hasn't appeared");
+        runTo(e, T0 + 2_900, T0 + 30_000);
         check(e.mode() == SyncEngine.Mode.AD && f.captures.isEmpty(), "no panel within 3 s -> ad, no captures");
         e.onPanel("Late", "Panel", T0 + 30_000);
         runTo(e, T0 + 30_000, T0 + 32_000);
@@ -242,7 +247,7 @@ public class EngineTests {
         // Foreground lost: hide, new generation, in-flight result dropped.
         f = new Fake();
         e = aligned(f);
-        runTo(e, T0 + 20_500, T0 + 57_000);
+        runTo(e, T0 + 7_500, T0 + 47_000);
         c2 = f.captures.get(1);
         e.onForeground(false, T0 + 58_000);
         check(!e.display(T0 + 58_100).visible, "XITE leaving the front hides");
@@ -280,6 +285,53 @@ public class EngineTests {
         f = new Fake();
         e = aligned(f);
         check(!e.display(T0 + 40_000).visible, "blank LRC line (instrumental gap) hides");
+
+        // Fast start: provisional lines from the panel identity before the first match.
+        f = new Fake();
+        e = songStarted(f);
+        runTo(e, T0, T0 + 2_000);
+        e.onLyrics(e.itemGen(), "Song", "Artist", lyrics(), T0 + 2_500);
+        SyncEngine.Display p = e.display(T0 + 5_000);              // video 5.0 s, delta 0 -> L1 (4-8 s)
+        check(p.visible && "L1".equals(p.line) && f.logged("sync_provisional"), "provisional line shown before any match");
+        int[] fc = f.captures.get(0);
+        e.onRecognition(fc[0], fc[1], T0 + 2_000, T0 + 7_000, match("Song", 2.9), T0 + 7_300);   // true delta +900
+        SyncEngine.Display snapped = e.display(T0 + 7_400);       // video 7.4 + 0.9 = 8.3 -> L2
+        check(snapped.visible && "L2".equals(snapped.line) && f.logged("sync_provisional_snap"), "first match snaps to the measured delta");
+
+        // Provisional gives up after 30 s without a match.
+        f = new Fake();
+        e = songStarted(f);
+        e.onLyrics(e.itemGen(), "Song", "Artist", lyrics(), T0 + 2_500);
+        e.tick(T0 + 30_001);
+        check(!e.display(T0 + 30_100).visible && f.logged("sync_provisional_expired"), "unconfirmed provisional lyrics hide after 30 s");
+
+        // A miss while acquiring retries at once.
+        f = new Fake();
+        e = songStarted(f);
+        runTo(e, T0, T0 + 2_000);
+        fc = f.captures.get(0);
+        e.onRecognition(fc[0], fc[1], T0 + 2_000, T0 + 7_000, fail(ShazamClient.Status.NO_MATCH, 0), T0 + 7_300);
+        runTo(e, T0 + 7_300, T0 + 7_800);
+        check(f.captures.size() == 2 && f.captures.get(1)[2] == 5_000, "miss while acquiring -> next 5 s clip at once");
+
+        // Shazam names a different song: provisional lyrics hide.
+        f = new Fake();
+        e = songStarted(f);
+        runTo(e, T0, T0 + 2_000);
+        e.onLyrics(e.itemGen(), "Song", "Artist", lyrics(), T0 + 2_500);
+        fc = f.captures.get(0);
+        e.onRecognition(fc[0], fc[1], T0 + 2_000, T0 + 7_000, match("Other", 2.5), T0 + 7_300);
+        check(!e.display(T0 + 7_400).visible, "identity conflict hides provisional lyrics");
+
+        // Joining mid-video: no provisional guess (position may not match the song).
+        f = new Fake();
+        e = new SyncEngine(f);
+        e.onSession(true, T0);
+        e.onForeground(true, T0);
+        e.onPlayback(PLAYING, 60_000, T0, 1f, T0);
+        e.onPanel("Song", "Artist", T0 + 500);
+        e.onLyrics(e.itemGen(), "Song", "Artist", lyrics(), T0 + 1_000);
+        check(!e.display(T0 + 1_500).visible, "no provisional lyrics when joining mid-video");
 
         // Panel disappearing (no more panel events) changes nothing.
         f = new Fake();

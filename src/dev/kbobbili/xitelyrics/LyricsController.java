@@ -58,8 +58,8 @@ public final class LyricsController {
         lrclib = new LrcLibClient(new File(app.getCacheDir(), "lrclib"), ClientSelfTest.userAgent());
         engine = new SyncEngine(new SyncEngine.Actions() {
             @Override
-            public void requestCapture(int itemGen, int clipEpoch) {
-                capture(itemGen, clipEpoch);
+            public void requestCapture(int itemGen, int clipEpoch, int clipMs) {
+                capture(itemGen, clipEpoch, clipMs);
             }
 
             @Override
@@ -105,14 +105,14 @@ public final class LyricsController {
 
     // ------------------------------------------------ capture + recognition
 
-    private void capture(int gen, int epoch) {
+    private void capture(int gen, int epoch, int clipMs) {
         CaptureService svc = CaptureService.running();
         if (svc == null) {
             ShazamClient.Result r = ShazamClientResults.noCapture();
             main.post(() -> engine.onRecognition(gen, epoch, 0, 0, r, SystemClock.elapsedRealtime()));
             return;
         }
-        svc.recordClip(8_000, clip -> {
+        svc.recordClip(clipMs, clip -> {
             ShazamClient.Result r = clip == null ? ShazamClientResults.noCapture() : shazam.recognize(clip.pcm);
             Events.log("sync_clip", "gen", gen, "epoch", epoch, "firstSampleRt", clip == null ? 0 : clip.firstSampleRt,
                     "result", r.toString());

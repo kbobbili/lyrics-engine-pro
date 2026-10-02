@@ -17,6 +17,12 @@ import java.util.Locale;
  *   delta          = shazamOffset - videoPos(firstSampleRt)    per accepted match
  *   referencePos(t)= videoPos(t) + delta - devicePipelineOffset
  *
+ * Fast start (owner decision 2026-10-02, measured on 17 songs): the first clip
+ * is 5 s, taken as soon as the info panel appears (from +2 s), and misses retry
+ * at once. Until it matches, lines show provisionally with delta = 0 (XITE's
+ * video matched the album track within 0.36 s median at song start), then snap
+ * to the measured delta.
+ *
  * Validity has two counters:
  *   itemGen   - bumped by a new item, seek, session change or XITE leaving the
  *               front; invalidates the alignment and all in-flight work.
@@ -25,8 +31,8 @@ import java.util.Locale;
  */
 public final class SyncEngine {
     public interface Actions {
-        /** Record one clip now and report back via onRecognition with the same tags. */
-        void requestCapture(int itemGen, int clipEpoch);
+        /** Record one clip of clipMs now and report back via onRecognition with the same tags. */
+        void requestCapture(int itemGen, int clipEpoch, int clipMs);
 
         /** Fetch lyrics and report back via onLyrics with the same tags. */
         void requestLyrics(int itemGen, String title, String artist);
@@ -55,9 +61,15 @@ public final class SyncEngine {
     }
 
     // Tunables (ms). Defaults from the plan and Phase 2 measurements.
-    static final long FIRST_CLIP_AFTER_START = 12_000;
+    static final long FIRST_CLIP_AFTER_START = 2_000;
+    static final int FAST_CLIP_MS = 5_000;          // while acquiring
+    static final int CLIP_MS = 8_000;               // once aligned (periodic checks, confirmations)
+    static final long RETRY_WHILE_ACQUIRING = 500;
+    static final long PROVISIONAL_MAX = 30_000;     // unconfirmed provisional lyrics give up
     static final long FIRST_CLIP_AFTER_JOIN = 2_000;
     static final long CLIP_PERIOD = 45_000;
+    /** Edits cluster (Homewrecker: two cuts ~15 s apart), so look again soon after one. */
+    static final long RECHECK_AFTER_EDIT = 15_000;
     static final long RETRY_AFTER_MISS = 15_000;
     static final long CONFIRM_AFTER_CONFLICT = 5_000;
     static final long REMEASURE_AFTER_RESUME = 3_000;
@@ -99,6 +111,8 @@ public final class SyncEngine {
     private int agreements;
     private double pendingDeltaMs;
     private boolean pending;
+    /** Showing lines at delta = 0 from the panel identity, before the first match. */
+    private boolean provisional;
 
     // Scheduling.
     private long nextCaptureRt = Long.MAX_VALUE;
@@ -227,7 +241,7 @@ public final class SyncEngine {
         panelArtist = artist;
         if (mode == Mode.AD) {                     // panel arrived late: it's a song after all
             actions.log("sync_ad_reclassified", "title", title);
-            enterAcquiring(Math.max(now + FIRST_CLIP_AFTER_JOIN, itemStartRt + FIRST_CLIP_AFTER_START), now);
+            enterAcquiring(now, now);
         }
         if (changed && recTitle == null) prefetchLyrics(title, artist);
     }
@@ -252,7 +266,7 @@ public final class SyncEngine {
                 break;
             default:                                // NO_MATCH, ERROR
                 actions.log("sync_miss", "status", r.status.name(), "error", r.error);
-                scheduleAt(now + RETRY_AFTER_MISS);
+                scheduleAt(now + (aligned ? RETRY_AFTER_MISS : RETRY_WHILE_ACQUIRING));
         }
     }
 
@@ -264,6 +278,11 @@ public final class SyncEngine {
         lines = c.status == LrcLibClient.Status.OK ? c.lines : null;
         actions.log("sync_lyrics", "status", c.status.name(), "id", c.candidateId,
                 "lines", lines == null ? 0 : lines.size(), "title", title);
+        if (lines != null && !aligned && !joinedMidItem && mode == Mode.ACQUIRING && panelTitle != null
+                && sameTitle(title, panelTitle) && now - itemStartRt < PROVISIONAL_MAX) {
+            provisional = true;
+            actions.log("sync_provisional", "title", title);
+        }
         if (c.status == LrcLibClient.Status.NONE && panelTitle != null
                 && !key(panelTitle, panelArtist).equals(key) && sameTitle(title, panelTitle)) {
             requestLyrics(panelTitle, panelArtist);
@@ -278,6 +297,10 @@ public final class SyncEngine {
             nextCaptureRt = Long.MAX_VALUE;
             actions.log("sync_ad");
         }
+        if (provisional && !aligned && now - itemStartRt > PROVISIONAL_MAX) {
+            provisional = false;
+            actions.log("sync_provisional_expired");
+        }
         if ((mode == Mode.ALIGNED || mode == Mode.CONFIRMING) && aligned
                 && now - lastAcceptedClipEndRt > FRESHNESS_CAP) {
             aligned = false;
@@ -287,19 +310,26 @@ public final class SyncEngine {
         }
         boolean capturing = foreground && state == STATE_PLAYING
                 && (mode == Mode.ACQUIRING || mode == Mode.ALIGNED || mode == Mode.CONFIRMING);
-        if (capturing && !captureInFlight && now >= nextCaptureRt) {
+        // A new item's first clip waits for the panel (songs) or the ad decision (no panel),
+        // so ads never cost a Shazam call.
+        boolean awaitingPanel = mode == Mode.ACQUIRING && !joinedMidItem && panelTitle == null && recTitle == null;
+        if (capturing && !awaitingPanel && !captureInFlight && now >= nextCaptureRt) {
             captureInFlight = true;
             nextCaptureRt = Long.MAX_VALUE;
-            actions.requestCapture(itemGen, clipEpoch);
+            actions.requestCapture(itemGen, clipEpoch, aligned ? CLIP_MS : FAST_CLIP_MS);
         }
     }
 
     /** Line to draw at now. */
     public Display display(long now) {
-        if (!foreground || lines == null || !aligned) return Display.HIDDEN;
-        if (mode != Mode.ALIGNED && mode != Mode.PAUSED) return Display.HIDDEN;
+        boolean tentative = !aligned && provisional;
+        if (!foreground || lines == null || !(aligned || tentative)) return Display.HIDDEN;
+        if (mode != Mode.ALIGNED && mode != Mode.PAUSED && !(tentative && mode == Mode.ACQUIRING)) {
+            return Display.HIDDEN;
+        }
         if (mode == Mode.PAUSED && state != STATE_PAUSED) return Display.HIDDEN;   // buffering etc.
-        double refS = (videoPos(now) + deltaMs - devicePipelineOffsetMs) / 1000.0;
+        double d = aligned ? deltaMs : 0;
+        double refS = (videoPos(now) + d - devicePipelineOffsetMs) / 1000.0;
         int i = Lrc.lineAt(lines, refS);
         if (i < 0) return Display.HIDDEN;
         Lrc.Line cur = lines.get(i);
@@ -317,6 +347,7 @@ public final class SyncEngine {
         if (panelTitle != null && !sameTitle(r.title, panelTitle) && recTitle == null) {
             // Shazam disagrees with the panel; ask again before trusting either.
             actions.log("sync_identity_conflict", "shazam", r.title, "panel", panelTitle);
+            provisional = false;
             if (pending && sameTitle(r.title, pendingTitle)) {
                 actions.log("sync_identity_shazam_confirmed", "title", r.title);
                 pending = false;
@@ -349,7 +380,7 @@ public final class SyncEngine {
             actions.log("sync_realigned", "fromMs", deltaMs, "toMs", d);
             accept(d, clipEndRt, "new_confirmed");
             pending = false;
-            schedulePeriodic(firstSampleRt);
+            scheduleAt(now + RECHECK_AFTER_EDIT);
             return;
         }
         // Conflict (repeated chorus or a real edit): hide and confirm quickly.
@@ -363,6 +394,8 @@ public final class SyncEngine {
     private String pendingTitle;
 
     private void accept(double d, long clipEndRt, String why) {
+        if (provisional) actions.log("sync_provisional_snap", "deltaMs", d);
+        provisional = false;
         agreements = aligned ? agreements + 1 : 1;
         deltaMs = d;
         aligned = true;
@@ -400,6 +433,7 @@ public final class SyncEngine {
         aligned = false;
         pending = false;
         pendingTitle = null;
+        provisional = false;
         agreements = 0;
         captureInFlight = false;
         nextCaptureRt = Long.MAX_VALUE;

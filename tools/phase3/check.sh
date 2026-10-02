@@ -6,6 +6,6 @@ cd "$(dirname "$0")/../.."
 if [ -n "${1:-}" ]; then
     uv run -q --python 3.12 --with shazamio-core==1.1.2 --with numpy python tools/phase3/make_fixtures.py "$1"
 fi
-rm -rf out/phase3 && mkdir -p out/phase3
-javac --release 17 -d out/phase3 src/dev/kbobbili/xitelyrics/fingerprint/*.java tools/phase3/FingerprintCheck.java
-java -cp out/phase3 FingerprintCheck tools/phase3/fixtures
+rm -rf tools/out/phase3 && mkdir -p tools/out/phase3
+javac --release 17 -d tools/out/phase3 src/dev/kbobbili/xitelyrics/fingerprint/*.java tools/phase3/FingerprintCheck.java
+java -cp tools/out/phase3 FingerprintCheck tools/phase3/fixtures
