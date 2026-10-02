@@ -401,6 +401,23 @@ public class EngineTests {
         e.onLyrics(e.itemGen(), "Song", "Artist", lyrics(), T0 + 1_000);
         check(!e.display(T0 + 1_500).visible, "no provisional lyrics when joining mid-video");
 
+        // Lyrics switch: off hides and stops captures; on reacquires 2 s later.
+        f = new Fake();
+        e = aligned(f);
+        e.setEnabled(false, T0 + 10_000);
+        int capsOff = f.captures.size();
+        runTo(e, T0 + 10_000, T0 + 120_000);
+        check(!e.display(T0 + 20_000).visible && f.captures.size() == capsOff, "lyrics off: hidden, no captures");
+        e.onPlayback(STOPPED, 0, T0 + 121_000, 0f, T0 + 121_000);       // a new song while off
+        e.onPlayback(BUFFERING, 0, T0 + 121_100, 0f, T0 + 121_100);
+        e.onPlayback(PLAYING, 0, T0 + 121_500, 1f, T0 + 121_500);
+        e.onPanel("Next", "Artist", T0 + 123_000);
+        runTo(e, T0 + 121_500, T0 + 140_000);
+        check(f.captures.size() == capsOff, "lyrics off: no captures for later songs either");
+        e.setEnabled(true, T0 + 140_000);
+        runTo(e, T0 + 140_000, T0 + 142_000);
+        check(f.captures.size() == capsOff + 1, "lyrics on: capture 2 s later");
+
         // Panel disappearing (no more panel events) changes nothing.
         f = new Fake();
         e = aligned(f);

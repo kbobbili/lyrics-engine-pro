@@ -24,7 +24,13 @@ import java.util.concurrent.Executors;
 public final class LyricsController {
     public interface DisplayListener {
         void onDisplay(SyncEngine.Display d);
+
+        /** A short message in place of the lyrics (e.g. "Lyrics off"). */
+        default void onNotice(String text) {
+        }
     }
+
+    private static final String PREFS = "lyrics";
 
     private static LyricsController instance;
 
@@ -75,6 +81,8 @@ public final class LyricsController {
                 Events.log(type, kv);
             }
         });
+        engine.setEnabled(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", true),
+                SystemClock.elapsedRealtime());
         if (!ticking) {
             ticking = true;
             main.post(tick);
@@ -83,6 +91,19 @@ public final class LyricsController {
 
     public void setDisplayListener(DisplayListener l) {
         listener = l;
+    }
+
+    /** Remote TV-icon button: flip lyrics on/off, remember it, and say so on screen. */
+    public void toggleLyrics() {
+        boolean on = !engine.enabled();
+        engine.setEnabled(on, SystemClock.elapsedRealtime());
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("on", on).apply();
+        notice(on ? "Lyrics on" : "Lyrics off");
+    }
+
+    public void notice(String text) {
+        Events.log("notice", "text", text);
+        if (listener != null) listener.onNotice(text);
     }
 
     // ------------------------------------------------ inputs (main thread)

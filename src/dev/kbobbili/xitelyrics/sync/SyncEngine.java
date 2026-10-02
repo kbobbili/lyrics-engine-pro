@@ -133,6 +133,8 @@ public final class SyncEngine {
     /** In CONFIRMING: true while showing the tentatively adopted new timing. */
     private boolean showTentative;
     private long clipPeriodMs = CLIP_PERIOD;
+    /** Owner's lyrics switch (remote TV-icon button). Off: nothing shown, no captures. */
+    private boolean enabled = true;
     private boolean pending;
     /** Showing lines at delta = 0 from the panel identity, before the first match. */
     private boolean provisional;
@@ -156,6 +158,27 @@ public final class SyncEngine {
 
     public void setDevicePipelineOffsetMs(long ms) {
         devicePipelineOffsetMs = ms;
+    }
+
+    public boolean enabled() {
+        return enabled;
+    }
+
+    /**
+     * Lyrics on/off. Off drops the alignment and stops all captures (no Shazam calls);
+     * on reacquires like joining mid-song (first clip after 2 s, no provisional guess).
+     */
+    public void setEnabled(boolean on, long now) {
+        if (on == enabled) return;
+        enabled = on;
+        actions.log("sync_enabled", "on", on);
+        newGeneration(on ? "lyrics_on" : "lyrics_off", now);
+        if (on && state == STATE_PLAYING && foreground && sessionPresent) {
+            joinedMidItem = true;
+            enterAcquiring(now + FIRST_CLIP_AFTER_JOIN, now);
+        } else if (!on) {
+            mode = Mode.WAITING;
+        }
     }
 
     /** Spacing of routine checks once aligned (default 30 s). */
@@ -367,7 +390,7 @@ public final class SyncEngine {
             mode = Mode.ACQUIRING;
             actions.log("sync_expired");
         }
-        boolean capturing = foreground && state == STATE_PLAYING
+        boolean capturing = enabled && foreground && state == STATE_PLAYING
                 && (mode == Mode.ACQUIRING || mode == Mode.ALIGNED || mode == Mode.CONFIRMING);
         // A new item's first clip waits for the panel (songs) or the ad decision (no panel),
         // so ads never cost a Shazam call.
@@ -382,7 +405,7 @@ public final class SyncEngine {
     /** Line to draw at now. */
     public Display display(long now) {
         boolean tentative = !aligned && provisional;
-        if (!foreground || lines == null || !(aligned || tentative)) return Display.HIDDEN;
+        if (!enabled || !foreground || lines == null || !(aligned || tentative)) return Display.HIDDEN;
         if (mode != Mode.ALIGNED && mode != Mode.PAUSED && !(tentative && mode == Mode.ACQUIRING)
                 && !(mode == Mode.CONFIRMING && showTentative)) {
             return Display.HIDDEN;

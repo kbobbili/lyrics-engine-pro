@@ -34,6 +34,8 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
     private final GradientDrawable bg = new GradientDrawable();
     private String shown;
     private boolean added;
+    private long noticeUntil;
+    private static final long NOTICE_MS = 1_500;
     private int bottomDp = 56;
 
     LyricsOverlay(Context ctx, OverlayStyle style) {
@@ -107,8 +109,28 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
     }
 
     @Override
+    public void onNotice(String text) {
+        if (!added) return;
+        noticeUntil = android.os.SystemClock.uptimeMillis() + NOTICE_MS;
+        shown = null;   // the next lyric update after the notice redraws from scratch
+        line.animate().cancel();
+        line.setText(text);
+        line.setAlpha(1f);
+        line.setVisibility(View.VISIBLE);
+    }
+
+    @Override
     public void onDisplay(SyncEngine.Display d) {
         if (!added) return;
+        if (android.os.SystemClock.uptimeMillis() < noticeUntil) return;   // a notice is showing
+        if (noticeUntil != 0) {
+            noticeUntil = 0;
+            if (!d.visible) {
+                line.animate().alpha(0f).setDuration(FADE_MS)
+                        .withEndAction(() -> line.setVisibility(View.INVISIBLE)).start();
+                return;
+            }
+        }
         String next = d.visible ? d.line : null;
         if (Objects.equals(next, shown)) return;
         boolean wasShowing = shown != null;

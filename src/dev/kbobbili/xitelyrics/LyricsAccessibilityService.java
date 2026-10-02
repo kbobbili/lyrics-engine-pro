@@ -74,6 +74,14 @@ public class LyricsAccessibilityService extends AccessibilityService {
      *   am broadcast -a dev.kbobbili.xitelyrics.STYLE --ei style 2 -p dev.kbobbili.xitelyrics
      */
     static final String ACTION_STYLE = "dev.kbobbili.xitelyrics.STYLE";
+    /**
+     * Debug: write XITE's accessibility tree to files/ui-dump-N.txt once a second for
+     * "seconds" seconds (read-only).
+     *   am broadcast -a dev.kbobbili.xitelyrics.DUMP_UI --ei seconds 20 -p dev.kbobbili.xitelyrics
+     */
+    static final String ACTION_DUMP_UI = "dev.kbobbili.xitelyrics.DUMP_UI";
+    /** Debug: run the Star-button action (injected key presses don't reach the key filter). */
+    static final String ACTION_STAR_TEST = "dev.kbobbili.xitelyrics.STAR_TEST";
     /** "7 Caption, no box" (Lexend, compact centred block at the bottom, shadow only), owner's pick 2026-10-02. */
     private static final int DEFAULT_STYLE = 6;
     private static final String PREFS = "overlay";
@@ -90,6 +98,18 @@ public class LyricsAccessibilityService extends AccessibilityService {
         public void onReceive(Context c, Intent i) {
             if (ACTION_PREVIEW.equals(i.getAction())) {
                 previewOverlay(i.getStringExtra("text"), i.getIntExtra("seconds", 5));
+                return;
+            }
+            if (ACTION_STAR_TEST.equals(i.getAction())) {
+                starPressed();
+                return;
+            }
+            if (ACTION_DUMP_UI.equals(i.getAction())) {
+                int seconds = i.getIntExtra("seconds", 20);
+                for (int n = 0; n < seconds; n++) {
+                    final int idx = n;
+                    handler.postDelayed(() -> dumpUi(idx), n * 1000L);
+                }
                 return;
             }
             if (ACTION_STYLE.equals(i.getAction())) {
@@ -125,6 +145,8 @@ public class LyricsAccessibilityService extends AccessibilityService {
         f.addAction(ACTION_OVERLAY);
         f.addAction(ACTION_PREVIEW);
         f.addAction(ACTION_STYLE);
+        f.addAction(ACTION_DUMP_UI);
+        f.addAction(ACTION_STAR_TEST);
         registerReceiver(markerReceiver, f, RECEIVER_EXPORTED);
         setOverlay(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("on", false));
         handler.post(poll);
@@ -233,6 +255,175 @@ public class LyricsAccessibilityService extends AccessibilityService {
     }
 
     /** Sample text in the current style, whatever the overlay setting. */
+    /** Remote buttons, acted on only while XITE is in front; everything else passes through. */
+    @Override
+    protected boolean onKeyEvent(android.view.KeyEvent e) {
+        if (!State.xiteForeground) return false;
+        int code = e.getKeyCode();
+        if (code == android.view.KeyEvent.KEYCODE_GUIDE) {           // TV-icon button
+            if (e.getAction() == android.view.KeyEvent.ACTION_UP) LyricsController.get(this).toggleLyrics();
+            return true;
+        }
+        if (code == android.view.KeyEvent.KEYCODE_MACRO_1) {         // Star button
+            if (e.getAction() == android.view.KeyEvent.ACTION_UP) starPressed();
+            return true;
+        }
+        return false;
+    }
+
+    // XITE's info panel: "Save Video" becomes "Video Saved" once saved (checked 2026-10-02).
+    private static final String SAVE_ID = "channelDetailsButtonsLikeVideo";
+    private static final String OPEN_PANEL_ID = "openMenuButton";
+    private static final String UNSAVED = "Save Video", SAVED = "Video Saved";
+    private static final long PANEL_WAIT_MS = 2_000, SETTLE_MS = 700, CONFIRM_POLL_MS = 250, CONFIRM_MAX_MS = 3_000;
+
+    /**
+     * Star: save the playing video to the XITE library, like pressing OK then Save.
+     * Clicks only a button that reads "Save Video", so it can never un-save.
+     */
+    private void starPressed() {
+        AccessibilityNodeInfo save = findXiteNode(SAVE_ID);
+        if (save != null) {
+            saveVia(save);
+            return;
+        }
+        AccessibilityNodeInfo open = findXiteNode(OPEN_PANEL_ID);
+        if (open == null || !open.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            Events.log("star_save", "result", "no_panel");
+            LyricsController.get(this).notice("Couldn't open XITE's panel");
+            return;
+        }
+        long deadline = SystemClock.uptimeMillis() + PANEL_WAIT_MS;
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                AccessibilityNodeInfo n = findXiteNode(SAVE_ID);
+                if (n != null) {
+                    // let the panel finish sliding in before pressing anything
+                    handler.postDelayed(() -> {
+                        AccessibilityNodeInfo fresh = findXiteNode(SAVE_ID);
+                        if (fresh != null) saveVia(fresh);
+                    }, SETTLE_MS);
+                } else if (SystemClock.uptimeMillis() < deadline) {
+                    handler.postDelayed(this, 150);
+                } else {
+                    Events.log("star_save", "result", "save_button_missing");
+                    LyricsController.get(LyricsAccessibilityService.this).notice("Couldn't find Save");
+                }
+            }
+        }, 150);
+    }
+
+    private void saveVia(AccessibilityNodeInfo save) {
+        String label = String.valueOf(save.getContentDescription());
+        if (SAVED.equals(label)) {
+            Events.log("star_save", "result", "already_saved");
+            LyricsController.get(this).notice("Already saved");
+            return;
+        }
+        if (!UNSAVED.equals(label)) {   // unknown state: never guess
+            Events.log("star_save", "result", "unknown_label", "label", label);
+            LyricsController.get(this).notice("Couldn't save");
+            return;
+        }
+        StringBuilder acts = new StringBuilder();
+        for (AccessibilityNodeInfo.AccessibilityAction a : save.getActionList()) {
+            acts.append(a.getId()).append(a.getLabel() != null ? ":" + a.getLabel() : "").append(' ');
+        }
+        // XITE's buttons react to the remote's OK on the highlighted control, not to an
+        // accessibility click. So: highlight Save, re-read it, and only if it is really the
+        // focused "Save Video" press OK (D-pad centre, Android 13+). Never press OK on
+        // anything else.
+        save.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+        handler.postDelayed(() -> {
+            AccessibilityNodeInfo n = findXiteNode(SAVE_ID);
+            boolean ready = n != null && n.isFocused()
+                    && UNSAVED.contentEquals(String.valueOf(n.getContentDescription()));
+            boolean pressed = ready && performGlobalAction(GLOBAL_ACTION_DPAD_CENTER);
+            Events.log("star_save_press", "ready", ready, "pressed", pressed, "actions", acts.toString());
+            if (!pressed) {
+                LyricsController.get(this).notice("Couldn't save");
+                return;
+            }
+            confirmSaved(SystemClock.uptimeMillis() + CONFIRM_MAX_MS);
+        }, 250);
+    }
+
+    private void confirmSaved(long deadline) {
+        AccessibilityNodeInfo after = findXiteNode(SAVE_ID);
+        boolean ok = after != null && SAVED.contentEquals(String.valueOf(after.getContentDescription()));
+        if (ok || SystemClock.uptimeMillis() >= deadline) {
+            Events.log("star_save", "result", ok ? "saved" : "unconfirmed");
+            // On success XITE shows its own "Saved to Library" message; only speak up on failure.
+            if (!ok) LyricsController.get(this).notice("Couldn't save");
+            return;
+        }
+        handler.postDelayed(() -> confirmSaved(deadline), CONFIRM_POLL_MS);
+    }
+
+    /**
+     * First XITE node whose view id ends with idSuffix, freshly read (refresh()): Android
+     * caches node contents, and a stale "Save Video" on a saved video would un-save it.
+     */
+    private AccessibilityNodeInfo findXiteNode(String idSuffix) {
+        for (AccessibilityWindowInfo w : getWindows()) {
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null
+                    || !PlaybackWatcher.XITE.contentEquals(root.getPackageName())) continue;
+            AccessibilityNodeInfo n = findById(root, idSuffix, 0);
+            if (n != null && n.refresh()) return n;
+        }
+        return null;
+    }
+
+    private static AccessibilityNodeInfo findById(AccessibilityNodeInfo n, String idSuffix, int depth) {
+        if (n == null || depth > 60) return null;
+        String id = n.getViewIdResourceName();
+        if (id != null && id.endsWith(idSuffix)) return n;
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo hit = findById(n.getChild(i), idSuffix, depth + 1);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    /** Debug dump of every XITE node: text, description, id, flags, bounds, actions. */
+    private void dumpUi(int idx) {
+        StringBuilder sb = new StringBuilder();
+        for (AccessibilityWindowInfo w : getWindows()) {
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null
+                    || !PlaybackWatcher.XITE.contentEquals(root.getPackageName())) continue;
+            sb.append("window type=").append(w.getType()).append(" active=").append(w.isActive()).append('\n');
+            dumpNode(root, sb, 0);
+        }
+        java.io.File f = new java.io.File(getExternalFilesDir(null), "ui-dump-" + idx + ".txt");
+        try (java.io.FileWriter out = new java.io.FileWriter(f)) {
+            out.write(sb.toString());
+        } catch (java.io.IOException ex) {
+            Events.log("ui_dump_failed", "error", ex.toString());
+        }
+        Events.log("ui_dump", "idx", idx, "chars", sb.length(), "panel", sb.indexOf("channelDetails") >= 0);
+    }
+
+    private void dumpNode(AccessibilityNodeInfo n, StringBuilder sb, int depth) {
+        if (n == null || depth > 60) return;
+        android.graphics.Rect r = new android.graphics.Rect();
+        n.getBoundsInScreen(r);
+        for (int i = 0; i < depth; i++) sb.append("  ");
+        sb.append(n.getClassName());
+        if (n.getText() != null) sb.append(" text=\"").append(n.getText()).append('"');
+        if (n.getContentDescription() != null) sb.append(" desc=\"").append(n.getContentDescription()).append('"');
+        if (n.getViewIdResourceName() != null) sb.append(" id=").append(n.getViewIdResourceName());
+        if (n.isClickable()) sb.append(" CLICKABLE");
+        if (n.isFocusable()) sb.append(" focusable");
+        if (n.isFocused()) sb.append(" FOCUSED");
+        if (!n.isVisibleToUser()) sb.append(" hidden");
+        sb.append(' ').append(r.toShortString());
+        sb.append(" actions=").append(n.getActionList().size()).append('\n');
+        for (int i = 0; i < n.getChildCount(); i++) dumpNode(n.getChild(i), sb, depth + 1);
+    }
+
     private void previewOverlay(String text, int seconds) {
         LyricsOverlay o = new LyricsOverlay(this, style());
         o.attach();
