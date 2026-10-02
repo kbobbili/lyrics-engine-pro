@@ -42,6 +42,10 @@ import java.util.Locale;
  * Clips land in /sdcard/Android/data/dev.kbobbili.xitelyrics/files/clips/.
  * Extra clip on demand:
  *   am broadcast -a dev.kbobbili.xitelyrics.CAPTURE_NOW -p dev.kbobbili.xitelyrics
+ * Continuous recording (Phase 2): one unbroken AudioRecord written as 60 s
+ * chunks under files/rec/<session>/, auto clips paused while it runs. The
+ * setting persists, so recording resumes whenever the projection comes back:
+ *   am broadcast -a dev.kbobbili.xitelyrics.RECORD --ez on true -p dev.kbobbili.xitelyrics
  * Stop the projection (same path as a system revocation), for lifecycle tests:
  *   am broadcast -a dev.kbobbili.xitelyrics.STOP_PROJECTION -p dev.kbobbili.xitelyrics
  */
@@ -49,6 +53,7 @@ public class CaptureService extends Service {
     static final String ACTION_START = "dev.kbobbili.xitelyrics.START";
     static final String ACTION_CAPTURE_NOW = "dev.kbobbili.xitelyrics.CAPTURE_NOW";
     static final String ACTION_STOP_PROJECTION = "dev.kbobbili.xitelyrics.STOP_PROJECTION";
+    static final String ACTION_RECORD = "dev.kbobbili.xitelyrics.RECORD";
     static final String EXTRA_CODE = "code";
     static final String EXTRA_DATA = "data";
     /** Also run as a microphone-type service; only if uid capture turns out silent without it. */
@@ -60,6 +65,10 @@ public class CaptureService extends Service {
     private static final long INTERVAL_MS = 30_000;
     private static final int KEEP_CLIPS = 60;
     private static final short SILENT_PEAK = 64;
+    private static final int CHUNK_FRAMES = RATE * 60;
+    private static final long REC_BUDGET_BYTES = 4L << 30;
+    private static final String PREFS = "capture";
+    private static final String PREF_CONTINUOUS = "continuous";
     private static final String CHANNEL = "capture";
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -69,11 +78,18 @@ public class CaptureService extends Service {
     private int xiteUid;
     private int clipSeq;
     private boolean receiverOn;
+    private volatile boolean recording;
+    private Thread recThread;
 
     private final BroadcastReceiver captureNow = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
-            if (ACTION_STOP_PROJECTION.equals(i.getAction())) {
+            if (ACTION_RECORD.equals(i.getAction())) {
+                boolean on = i.getBooleanExtra("on", true);
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_CONTINUOUS, on).apply();
+                if (on) startRecording();
+                else stopRecording();
+            } else if (ACTION_STOP_PROJECTION.equals(i.getAction())) {
                 MediaProjection mp = projection;
                 Events.log("projection_stop_requested");
                 if (mp != null) mp.stop(); // fires onStop like a revocation
@@ -96,7 +112,7 @@ public class CaptureService extends Service {
         public void run() {
             long start = SystemClock.uptimeMillis();
             State.Playback p = State.playback;
-            if (State.xiteForeground && p != null && p.playing()) captureClip("auto");
+            if (!recording && State.xiteForeground && p != null && p.playing()) captureClip("auto");
             if (work != null) work.postAtTime(this, start + INTERVAL_MS);
         }
     };
@@ -146,6 +162,7 @@ public class CaptureService extends Service {
         State.captureRunning = true;
         IntentFilter filter = new IntentFilter(ACTION_CAPTURE_NOW);
         filter.addAction(ACTION_STOP_PROJECTION);
+        filter.addAction(ACTION_RECORD);
         registerReceiver(captureNow, filter, RECEIVER_EXPORTED);
         receiverOn = true;
         worker = new HandlerThread("capture");
@@ -153,7 +170,160 @@ public class CaptureService extends Service {
         work = new Handler(worker.getLooper());
         work.postDelayed(tick, 3000);
         Events.log("projection_started", "xiteUid", xiteUid, "withMic", mic);
+        if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_CONTINUOUS, false)) startRecording();
         return START_NOT_STICKY;
+    }
+
+    private AudioRecord newRecorder(MediaProjection mp) {
+        AudioPlaybackCaptureConfiguration cfg =
+                new AudioPlaybackCaptureConfiguration.Builder(mp).addMatchingUid(xiteUid).build();
+        AudioFormat fmt = new AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(RATE)
+                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                .build();
+        int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+        return new AudioRecord.Builder()
+                .setAudioFormat(fmt)
+                .setBufferSizeInBytes(Math.max(min * 4, RATE * 2))
+                .setAudioPlaybackCaptureConfig(cfg)
+                .build();
+    }
+
+    private synchronized void startRecording() {
+        if (recording || projection == null) return;
+        recording = true;
+        recThread = new Thread(this::recordLoop, "rec");
+        recThread.start();
+    }
+
+    private void stopRecording() {
+        Thread t;
+        synchronized (this) {
+            recording = false;
+            t = recThread;
+            recThread = null;
+        }
+        if (t != null && t != Thread.currentThread()) {
+            try {
+                t.join(2000);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /**
+     * Records until stopped or the projection ends. Frame numbers in the chunk
+     * JSON run on across chunks, so a session is one continuous timeline.
+     */
+    private void recordLoop() {
+        MediaProjection mp = projection;
+        if (mp == null) {
+            recording = false;
+            return;
+        }
+        String session = String.valueOf(System.currentTimeMillis());
+        File dir = new File(getExternalFilesDir(null), "rec/" + session);
+        dir.mkdirs();
+        AudioRecord rec;
+        try {
+            rec = newRecorder(mp);
+            rec.startRecording();
+        } catch (Exception e) {
+            Events.log("rec_failed", "error", e.toString());
+            recording = false;
+            return;
+        }
+        Events.log("rec_started", "session", session, "bufferFrames", rec.getBufferSizeInFrames());
+        short[] buf = new short[CHUNK_FRAMES];
+        AudioTimestamp ts = new AudioTimestamp();
+        JSONArray reads = new JSONArray();
+        long frameBase = 0;
+        int got = 0;
+        int chunk = 0;
+        try {
+            while (recording) {
+                int n = rec.read(buf, got, Math.min(READ_FRAMES, buf.length - got));
+                long now = SystemClock.elapsedRealtimeNanos();
+                if (n < 0) {
+                    Events.log("rec_read_error", "code", n);
+                    break;
+                }
+                got += n;
+                JSONObject r = new JSONObject();
+                r.put("frames", frameBase + got);
+                r.put("nowNs", now);
+                if (rec.getTimestamp(ts, AudioTimestamp.TIMEBASE_BOOTTIME) == AudioRecord.SUCCESS) {
+                    r.put("tsFrame", ts.framePosition);
+                    r.put("tsNs", ts.nanoTime);
+                }
+                reads.put(r);
+                if (got == buf.length) {
+                    writeChunk(dir, session, ++chunk, frameBase, buf, got, reads);
+                    frameBase += got;
+                    got = 0;
+                    reads = new JSONArray();
+                }
+            }
+            if (got > 0) writeChunk(dir, session, ++chunk, frameBase, buf, got, reads);
+        } catch (JSONException e) {
+            Events.log("rec_failed", "error", e.toString());
+        } finally {
+            rec.stop();
+            rec.release();
+            recording = false;
+            Events.log("rec_stopped", "session", session, "chunks", chunk);
+        }
+    }
+
+    private void writeChunk(File dir, String session, int chunk, long firstFrame,
+            short[] pcm, int frames, JSONArray reads) {
+        int peak = 0;
+        for (int i = 0; i < frames; i++) peak = Math.max(peak, Math.abs((int) pcm[i]));
+        String base = String.format(Locale.US, "chunk-%05d", chunk);
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("session", session);
+            meta.put("chunk", chunk);
+            meta.put("rate", RATE);
+            meta.put("firstFrame", firstFrame);
+            meta.put("frames", frames);
+            meta.put("peak", peak);
+            meta.put("reads", reads);
+            writeWav(new File(dir, base + ".wav"), pcm, frames);
+            try (FileOutputStream out = new FileOutputStream(new File(dir, base + ".json"))) {
+                out.write(meta.toString().getBytes("UTF-8"));
+            }
+        } catch (IOException | JSONException e) {
+            Events.log("chunk_save_failed", "error", e.toString());
+        }
+        Events.log("chunk", "session", session, "chunk", chunk, "peak", peak);
+        pruneRecordings(new File(getExternalFilesDir(null), "rec"));
+    }
+
+    /** Deletes the oldest sessions once recordings exceed the storage budget. */
+    private static void pruneRecordings(File root) {
+        File[] sessions = root.listFiles(File::isDirectory);
+        if (sessions == null) return;
+        Arrays.sort(sessions);
+        long total = 0;
+        for (File s : sessions) {
+            File[] fs = s.listFiles();
+            if (fs != null) for (File f : fs) total += f.length();
+        }
+        for (File s : sessions) {
+            if (total <= REC_BUDGET_BYTES) return;
+            File[] fs = s.listFiles();
+            if (fs != null) {
+                for (File f : fs) {
+                    total -= f.length();
+                    f.delete();
+                }
+            }
+            s.delete();
+        }
     }
 
     private void captureClip(String reason) {
@@ -170,21 +340,7 @@ public class CaptureService extends Service {
             meta.put("reason", reason);
             meta.put("rate", RATE);
             meta.put("before", State.snapshot());
-            AudioPlaybackCaptureConfiguration cfg =
-                    new AudioPlaybackCaptureConfiguration.Builder(mp).addMatchingUid(xiteUid).build();
-            AudioFormat fmt = new AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                    .build();
-            int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT);
-            rec = new AudioRecord.Builder()
-                    .setAudioFormat(fmt)
-                    .setBufferSizeInBytes(Math.max(min * 4, RATE * 2))
-                    .setAudioPlaybackCaptureConfig(cfg)
-                    .build();
-            meta.put("minBuffer", min);
+            rec = newRecorder(mp);
             meta.put("bufferFrames", rec.getBufferSizeInFrames());
 
             AudioTimestamp ts = new AudioTimestamp();
@@ -293,6 +449,7 @@ public class CaptureService extends Service {
 
     private void shutdown() {
         State.captureRunning = false;
+        stopRecording();
         if (worker != null) worker.quitSafely();
         worker = null;
         work = null;

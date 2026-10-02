@@ -1,6 +1,10 @@
 package dev.kbobbili.xitelyrics;
 
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSession;
@@ -31,6 +35,27 @@ public class PlaybackWatcher extends NotificationListenerService {
     private MediaController controller;
     private MediaSession.Token token;
 
+    static final String ACTION_TRANSPORT = "dev.kbobbili.xitelyrics.TRANSPORT";
+
+    /**
+     * Calibration helper: pause/resume XITE through its media session.
+     *   am broadcast -a dev.kbobbili.xitelyrics.TRANSPORT --es cmd pause -p dev.kbobbili.xitelyrics
+     */
+    private final BroadcastReceiver transport = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            if (FingerprintSelfTest.ACTION.equals(i.getAction())) {
+                FingerprintSelfTest.run(PlaybackWatcher.this);
+                return;
+            }
+            String cmd = i.getStringExtra("cmd");
+            Events.log("transport", "cmd", cmd, "attached", controller != null);
+            if (controller == null) return;
+            if ("pause".equals(cmd)) controller.getTransportControls().pause();
+            else if ("play".equals(cmd)) controller.getTransportControls().play();
+        }
+    };
+
     private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener =
             this::onSessions;
 
@@ -60,6 +85,9 @@ public class PlaybackWatcher extends NotificationListenerService {
         Events.init(this);
         Events.log("listener_connected");
         msm = getSystemService(MediaSessionManager.class);
+        IntentFilter debug = new IntentFilter(ACTION_TRANSPORT);
+        debug.addAction(FingerprintSelfTest.ACTION);
+        registerReceiver(transport, debug, RECEIVER_EXPORTED);
         ComponentName me = new ComponentName(this, PlaybackWatcher.class);
         msm.addOnActiveSessionsChangedListener(sessionsListener, me, handler);
         onSessions(msm.getActiveSessions(me));
@@ -70,6 +98,7 @@ public class PlaybackWatcher extends NotificationListenerService {
     public void onListenerDisconnected() {
         Events.log("listener_disconnected");
         if (msm != null) msm.removeOnActiveSessionsChangedListener(sessionsListener);
+        unregisterReceiver(transport);
         detach();
     }
 

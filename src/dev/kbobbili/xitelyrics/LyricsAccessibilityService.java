@@ -1,7 +1,16 @@
 package dev.kbobbili.xitelyrics;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.graphics.Color;
+import android.graphics.PixelFormat;
+import android.view.Choreographer;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
 import android.content.pm.ResolveInfo;
 import android.os.Handler;
 import android.os.Looper;
@@ -46,6 +55,23 @@ public class LyricsAccessibilityService extends AccessibilityService {
     /** Every package with a HOME activity (the TV also lists its setup wizard). */
     private final Set<String> launcherPkgs = new HashSet<>();
     private long lastLaunchRt = -BACKOFF_MAX_MS;
+    private View marker;
+
+    static final String ACTION_MARKER = "dev.kbobbili.xitelyrics.MARKER";
+
+    /**
+     * Calibration: flashes a white square (top-left) "count" times, every
+     * "periodMs", each lit for "onMs", and logs the elapsed-realtime of the
+     * display frame that shows / hides it.
+     *   am broadcast -a dev.kbobbili.xitelyrics.MARKER --ei count 20 -p dev.kbobbili.xitelyrics
+     */
+    private final BroadcastReceiver markerReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            flashMarker(i.getIntExtra("count", 20), i.getIntExtra("periodMs", 2000),
+                    i.getIntExtra("onMs", 300));
+        }
+    };
     private long backoffMs = BACKOFF_MIN_MS;
 
     @Override
@@ -59,6 +85,7 @@ public class LyricsAccessibilityService extends AccessibilityService {
             launcherPkgs.add(r.activityInfo.packageName);
         }
         Events.log("launchers", "pkgs", launcherPkgs.toString());
+        registerReceiver(markerReceiver, new IntentFilter(ACTION_MARKER), RECEIVER_EXPORTED);
         handler.post(poll);
     }
 
@@ -145,6 +172,46 @@ public class LyricsAccessibilityService extends AccessibilityService {
             else if (id.endsWith("channelDetailsProgressText")) panel.progress = text.toString();
         }
         for (int i = 0; i < node.getChildCount(); i++) collect(node.getChild(i), panel, depth + 1);
+    }
+
+    private void flashMarker(int count, int periodMs, int onMs) {
+        WindowManager wm = getSystemService(WindowManager.class);
+        if (marker == null) {
+            marker = new View(this);
+            marker.setBackgroundColor(Color.WHITE);
+            marker.setVisibility(View.INVISIBLE);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(220, 220,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            lp.x = 40;
+            lp.y = 40;
+            wm.addView(marker, lp);
+        }
+        Events.log("marker_start", "count", count, "periodMs", periodMs, "onMs", onMs);
+        for (int n = 0; n < count; n++) {
+            final int idx = n;
+            handler.postDelayed(() -> setMarker(true, idx), 1000L + (long) n * periodMs);
+            handler.postDelayed(() -> setMarker(false, idx), 1000L + (long) n * periodMs + onMs);
+        }
+        handler.postDelayed(() -> {
+            if (marker != null) wm.removeView(marker);
+            marker = null;
+            Events.log("marker_done");
+        }, 2000L + (long) count * periodMs);
+    }
+
+    private void setMarker(boolean on, int idx) {
+        if (marker == null) return;
+        marker.setVisibility(on ? View.VISIBLE : View.INVISIBLE);
+        // The next frame callback's vsync time is the frame that draws the change.
+        Choreographer.getInstance().postFrameCallback(frameNs -> {
+            long toBoot = SystemClock.elapsedRealtimeNanos() - System.nanoTime();
+            Events.log(on ? "marker_on" : "marker_off", "idx", idx, "frameRtNs", frameNs + toBoot);
+        });
     }
 
     @Override
