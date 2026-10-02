@@ -44,6 +44,7 @@ final class LyricsOverlay implements LyricsController.DisplayListener {
         line.setGravity(Gravity.CENTER);
         line.setShadowLayer(4, 0, 2, Color.BLACK);
         line.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_BALANCED);   // even line lengths
+        line.setIncludeFontPadding(false);   // Lexend's built-in top/bottom spacing made the box tall
         line.setBackground(bg);
         // INVISIBLE, never GONE: a GONE view shrinks the window to zero height, and Android
         // then stops redrawing it, so the last line stays on screen after "hiding".

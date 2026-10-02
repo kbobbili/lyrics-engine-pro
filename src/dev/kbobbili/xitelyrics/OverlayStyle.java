@@ -52,8 +52,8 @@ final class OverlayStyle {
             new OverlayStyle("5 Clean", "fonts/Lexend-Variable.ttf", 500, 31, 140, 16, 28, 12, 0f),
             // Compact centred block of up to 4 lines (max 45% of the width) at the very bottom,
             // where XITE's own captions (now switched off in XITE) sat; style 5's font and box.
-            new OverlayStyle("6 Caption", "fonts/Lexend-Variable.ttf", 500, 30, 140, 16, 22, 10, 0f,
-                    false, 0.45f, 4, 6),
+            new OverlayStyle("6 Caption", "fonts/Lexend-Variable.ttf", 500, 30, 140, 12, 14, 6, 0f,
+                    false, 0.45f, 4, 2),
     };
 
     static OverlayStyle get(int index) {
