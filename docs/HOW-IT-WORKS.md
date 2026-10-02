@@ -91,6 +91,19 @@ Android's audio system, and Shazam's offset refers to that sample.
 | Shazam load | ~8 lookups per song; zero errors or rate limits in ~900 calls |
 | Coverage | ~85–90 % of songs have lyrics (LRCLIB's catalogue is the limit; live versions skipped) |
 
+## Remote buttons (while XITE is in front)
+
+| Button | Action |
+|---|---|
+| **TV icon** (below D-pad right; Android `GUIDE`) | Lyrics on/off. Off also stops listening (no Shazam calls); on resyncs ~2 s later. Remembered across reboots; a brief "Lyrics off/on" note confirms. |
+| **Star** (Google TV "magic button"; Android `MACRO_1`) | Save the playing video to the XITE library: opens XITE's info panel if needed, highlights **Save Video** and presses OK. XITE confirms with its own "Saved to Library". If the button already reads **Video Saved**, nothing is pressed ("Already saved") — it can never un-save. |
+
+On the home screen both buttons keep their normal jobs, and every other key always passes through
+untouched. How it works: the accessibility service may filter key events, and acts on these two
+only while XITE is in front. XITE's buttons respond to the remote's OK, not to accessibility clicks,
+so Star highlights Save and sends a D-pad-centre press (Android 13+) — only after a fresh read
+confirms the highlight is on an unsaved "Save Video".
+
 ## Running it
 
 **On the TV, day to day:** nothing to do. The app survives reboots, sleep/wake and XITE updates. It
@@ -111,7 +124,8 @@ Wireless adb is `192.168.1.129:5555` after reboots.
 
 Switches (adb broadcasts to `dev.kbobbili.xitelyrics`): `OVERLAY` (on/off), `STYLE` (preset 0–6;
 default 6 = "Caption, no box"; 5 = the same with a box), `OVERLAY_PREVIEW` (sample text). Debug: `RECORD`, `CAPTURE_NOW`,
-`STOP_PROJECTION`, `MARKER`, `TRANSPORT`, `FP_SELFTEST`, `P4_SELFTEST`.
+`STOP_PROJECTION`, `MARKER`, `TRANSPORT`, `FP_SELFTEST`, `P4_SELFTEST`, `DUMP_UI` (read-only XITE
+screen dump), `STAR_TEST` (runs the Star action — injected key presses don't reach the key filter).
 
 ## Testing and tools
 
