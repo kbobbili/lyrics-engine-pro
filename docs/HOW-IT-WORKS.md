@@ -72,7 +72,11 @@ Android's audio system, and Shazam's offset refers to that sample.
 
 - **XITE closes itself if any activity opens on top of it.** The one-time capture permission is
   therefore taken only from the home screen (app-op → no dialog) and then kept alive by a foreground
-  service. Overlays are windows, not activities, so they're safe.
+  service while the home screen or XITE is in front. Overlays are windows, not activities, so
+  they're safe.
+- **The capture indicator shows only on the home screen and in XITE.** Once another app has been
+  in front for 5 s, the permission is released (Android's recording icon goes away) and taken back
+  silently on the next home-screen visit. So XITE must be opened from the home screen to get lyrics.
 - **XITE's videos often differ from the album tracks** — about 1 song in 4 had cuts or scenes, and
   some videos are minutes longer. Measuring the offset by listening is what makes the lyrics land.
 - **Ads have no info panel**, which makes them detectable instantly without spending a Shazam call.

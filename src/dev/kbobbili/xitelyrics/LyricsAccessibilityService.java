@@ -42,6 +42,11 @@ public class LyricsAccessibilityService extends AccessibilityService {
     private static final long BACKOFF_MAX_MS = 15 * 60_000;
     /** A consent dialog left open this long counts as abandoned. */
     private static final long PENDING_REQUEST_MS = 120_000;
+    /** Another app in front this long releases the projection (brief system screens don't). */
+    private static final long RELEASE_AFTER_MS = 5_000;
+    /** A launch whose ProjectionActivity hasn't run after this long counts as lost. */
+    private static final long LOST_LAUNCH_MS = 3_000;
+    private static final int MAX_LOST_RETRIES = 3;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable read = this::read;
@@ -59,6 +64,8 @@ public class LyricsAccessibilityService extends AccessibilityService {
     private final Set<String> launcherPkgs = new HashSet<>();
     private long lastLaunchRt = -BACKOFF_MAX_MS;
     private int awayReads;
+    private long otherAppSinceRt;
+    private int lostRetries;
     private View marker;
 
     static final String ACTION_MARKER = "dev.kbobbili.xitelyrics.MARKER";
@@ -209,7 +216,29 @@ public class LyricsAccessibilityService extends AccessibilityService {
                     "videoPos", p == null ? null : p.positionAt(rt));
             State.panelProgress = panel.progress;
         }
+        maybeReleaseProjection(top);
         maybeLaunchProjection(top != null && launcherPkgs.contains(top));
+    }
+
+    /**
+     * Releases the projection once another app (not XITE, not a launcher) has been in
+     * front for RELEASE_AFTER_MS, so the system's capture indicator only shows on the
+     * home screen and in XITE. Unknown reads ("?" or none) leave the timer as it is.
+     */
+    private void maybeReleaseProjection(String top) {
+        if (top == null || "?".equals(top)) return;
+        if (PlaybackWatcher.XITE.equals(top) || launcherPkgs.contains(top) || getPackageName().equals(top)) {
+            otherAppSinceRt = 0;
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (otherAppSinceRt == 0) otherAppSinceRt = now;
+        CaptureService c = CaptureService.running();
+        if (c == null || now - otherAppSinceRt < RELEASE_AFTER_MS) return;
+        c.release("other_app:" + top);
+        // The next home-screen visit must reacquire at once, not wait out the launch backoff.
+        lastLaunchRt = -BACKOFF_MAX_MS;
+        backoffMs = BACKOFF_MIN_MS;
     }
 
     private void maybeLaunchProjection(boolean onHomeScreen) {
@@ -221,9 +250,19 @@ public class LyricsAccessibilityService extends AccessibilityService {
         long now = SystemClock.elapsedRealtime();
         long pending = State.projectionRequestRt;
         if (pending != 0 && now - pending < PENDING_REQUEST_MS) return;
-        if (now - lastLaunchRt < backoffMs) return;
+        // The launcher can bury ProjectionActivity before it ever runs (seen right after Home
+        // on Google's launcher). Such a lost launch is retried soon instead of after the backoff.
+        boolean lost = State.projectionActivityRt < lastLaunchRt && now - lastLaunchRt >= LOST_LAUNCH_MS
+                && lostRetries < MAX_LOST_RETRIES;
+        if (now - lastLaunchRt < backoffMs && !lost) return;
+        if (lost) {
+            lostRetries++;
+            Events.log("projection_launch_lost", "retry", lostRetries);
+        } else {
+            lostRetries = 0;
+            backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+        }
         lastLaunchRt = now;
-        backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
         Events.log("projection_launch_attempt", "nextBackoffMs", backoffMs);
         try {
             startActivity(new Intent(this, ProjectionActivity.class)

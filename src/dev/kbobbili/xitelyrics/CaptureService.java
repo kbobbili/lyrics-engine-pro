@@ -517,6 +517,15 @@ public class CaptureService extends Service {
                 .build();
     }
 
+    /**
+     * Gives the projection up, which also clears the system's capture indicator. Main
+     * thread only. The home screen reacquires it silently on the next visit.
+     */
+    void release(String why) {
+        Events.log("projection_release", "why", why);
+        shutdown();
+    }
+
     private void shutdown() {
         State.captureRunning = false;
         if (current == this) current = null;

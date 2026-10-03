@@ -24,6 +24,7 @@ public class ProjectionActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         Events.init(this);
+        State.projectionActivityRt = SystemClock.elapsedRealtime();
         if (saved != null) return; // recreated while the consent dialog was up
         if (State.captureRunning) {
             Events.log("projection_skip", "why", "already_running");

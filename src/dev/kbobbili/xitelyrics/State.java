@@ -30,6 +30,8 @@ public final class State {
     /** Set when the user cancels the consent dialog; stops auto-relaunch until reconnect. */
     public static volatile boolean consentDenied;
     public static volatile long projectionRequestRt;
+    /** When ProjectionActivity last actually ran (never cleared), to spot buried launches. */
+    public static volatile long projectionActivityRt;
 
     public static synchronized int bumpGeneration(String reason) {
         generation++;
